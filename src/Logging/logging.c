@@ -58,7 +58,7 @@ esp_err_t SDIO_SD_Init(void)
         .format_if_mount_failed = false,
 #endif // EXAMPLE_FORMAT_IF_MOUNT_FAILED
         .max_files = 5,
-        .allocation_unit_size = 16 * 1024};
+        .allocation_unit_size = 4096}; // used to be 16 * 1024
 
     // By default, SD card frequency is initialized to SDMMC_FREQ_DEFAULT (20MHz)
     // For setting a specific frequency, use host.max_freq_khz (range 400kHz - 40MHz for SDMMC)
@@ -74,8 +74,25 @@ esp_err_t SDIO_SD_Init(void)
     host.max_freq_khz = SDMMC_FREQ_DDR50;
 #endif
 
+    // ESP32-S3     pin	SD card     pin	Notes
+    // GPIO36	    CLK	            10K pullup
+    // GPIO35	    CMD	            10k pullup
+    // GPIO37	    D0	            10k pullup
+    // GPIO38	    D1	            not used in 1-line SD mode; 10k pullup in 4-line mode
+    // GPIO21	    D2	            not used in 1-line SD mode; 10k pullup in 4-line mode
+    // GPIO47	    D3	            not used in 1-line SD mode, but card's D3 pin must have a 10k pullup
+
     // This initializes the slot without card detect (CD) and write protect (WP) signals.
     sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
+
+    // Note: Due to differences in D2, D3, we set it manually
+
+    slot_config.clk = GPIO_NUM_36;
+    slot_config.cmd = GPIO_NUM_35;
+    slot_config.d0 = GPIO_NUM_37;
+    slot_config.d1 = GPIO_NUM_38;
+    slot_config.d2 = GPIO_NUM_21;
+    slot_config.d3 = GPIO_NUM_47;
 
     // Set bus width to use:
 #ifdef SDMMC_BUS_WIDTH_4
@@ -91,10 +108,10 @@ esp_err_t SDIO_SD_Init(void)
     ret = esp_vfs_fat_sdmmc_mount(mount_point, &host, &slot_config, &mount_config, &card);
 
     // Set the log level for the GPIO driver to WARN to reduce Messages
-    esp_log_level_set("gpio", ESP_LOG_WARN);
-    esp_vfs_fat_sdcard_unmount(mount_point, card);
+    // esp_log_level_set("gpio", ESP_LOG_WARN);
+    // esp_vfs_fat_sdcard_unmount(mount_point, card);
 
-    ret = esp_vfs_fat_sdmmc_mount(mount_point, &host, &slot_config, &mount_config, &card);
+    // ret = esp_vfs_fat_sdmmc_mount(mount_point, &host, &slot_config, &mount_config, &card);
 
     // Card has been initialized, print its properties
     sdmmc_card_print_info(stdout, card);
@@ -111,7 +128,7 @@ esp_err_t SDIO_SD_Init(void)
 esp_err_t SDIO_SD_DeInit(void)
 {
     ret = ESP_OK;
-    if(open_file != NULL)
+    if (open_file != NULL && f != NULL)
         fclose(f);
     ret = esp_vfs_fat_sdcard_unmount(mount_point, card);
     return ret;
@@ -129,11 +146,13 @@ esp_err_t SDIO_SD_DeInit(void)
 esp_err_t SDIO_SD_Create_Write_File(SDIO_FileConfig *file, SDIO_TxBuffer *pTxBuffer)
 {
     ret = ESP_OK;
+    static const char *TAG = "SDIO_SD_Create_Write_File";
     // Check if another file is already opened
-    if (open_file != NULL)
+    if (open_file != NULL && f != NULL)
     {
         fclose(f);        // close the previously opened file
         open_file = NULL; // Reset the open file name
+        f = NULL;
     }
     snprintf(file->path, sizeof(file->path), "%s/%s", MOUNT_POINT, file->name);
 
@@ -149,6 +168,8 @@ esp_err_t SDIO_SD_Create_Write_File(SDIO_FileConfig *file, SDIO_TxBuffer *pTxBuf
     struct stat st;
     if ((stat(file->path, &st) == 0) && (compare_file_time_days(file->path) <= MAX_DAYS_MODIFIED))
     {
+        //@debgu
+        // ESP_LOGI(TAG, "File is recent");
         // Add to the file and don't create new one
         if (SDIO_SD_Add_Data(file, pTxBuffer) != ESP_OK)
         {
@@ -157,6 +178,8 @@ esp_err_t SDIO_SD_Create_Write_File(SDIO_FileConfig *file, SDIO_TxBuffer *pTxBuf
     }
     else // Create new file
     {
+        //@Debug
+        // ESP_LOGI(TAG, "File is not recent or don't exits\n Creating new File!");
 
         f = fopen(file->path, "w");
         if (f == NULL)
@@ -247,6 +270,7 @@ esp_err_t SDIO_SD_Create_Write_File(SDIO_FileConfig *file, SDIO_TxBuffer *pTxBuf
 
     fclose(f);        // Close the file after writing
     open_file = NULL; // Reset the open file name
+    f = NULL;
     return ret;
 }
 
@@ -264,23 +288,43 @@ esp_err_t SDIO_SD_Create_Write_File(SDIO_FileConfig *file, SDIO_TxBuffer *pTxBuf
 esp_err_t SDIO_SD_Add_Data(SDIO_FileConfig *file, SDIO_TxBuffer *pTxBuffer)
 {
     ret = ESP_OK;
+    static const char *TAG = "SDIO_SD_Add_Data";
 
     struct stat st;
     if (stat(file->path, &st) == 0) // Check if the files exists
     {
-        if (open_file != file->name)
+        //@debug
+        // ESP_LOGI(TAG, "Found File Successfully!");
+        if (open_file != file->name && f != NULL)
         {
+            //@debug
+            //ESP_LOGI(TAG, "Closing the File %s now", open_file);
             fclose(f);        // close the previously opened file
             open_file = NULL; // Reset the open file name
+            f = NULL;
+
+            f = fopen(file->path, "a");
+        }
+        else if (open_file == NULL) // There is no file open
+        {
+            //@debug
+            // ESP_LOGI(TAG, "No file is currently Open");
             f = fopen(file->path, "a");
         }
 
         if (f == NULL)
         {
+            //@debug
+            ESP_LOGE(TAG, "F is equal to Null | Faild to create File");
             ret = ESP_FAIL; // Failed to open file for writing
         }
         else
         {
+            //@debug
+            // ESP_LOGI(TAG, "File %s Opened Successfully For appending!", open_file);
+            
+            open_file = file->name; // Assign the name of the opened file
+      
             // Get current Time
             char time_buffer[32];
             if (Time_Sync_get_rtc_time_str(time_buffer, sizeof(time_buffer)) != true)
@@ -288,8 +332,6 @@ esp_err_t SDIO_SD_Add_Data(SDIO_FileConfig *file, SDIO_TxBuffer *pTxBuffer)
                 ESP_LOGE("RTC", "Failed to get time.");
                 strcpy(time_buffer, "XXXXXXXX");
             }
-
-            open_file = file->name; // Assign the name of the opened file
 
             // Check if file type is .TXT or .CSV
             if (file->type == TXT)
@@ -359,6 +401,7 @@ esp_err_t SDIO_SD_Add_Data(SDIO_FileConfig *file, SDIO_TxBuffer *pTxBuffer)
                 fflush(f); // Push buffer to disk
                 fclose(f); // Optional but safer after each batch
                 open_file = NULL;
+                f = NULL;
             }
             else
             {
@@ -387,6 +430,7 @@ esp_err_t SDIO_SD_Read_Data(SDIO_FileConfig *file)
     {
         fclose(f);        // close the previously opened file
         open_file = NULL; // Reset the open file name
+        f = NULL;
     }
     snprintf(file->path, sizeof(file->path), "%s/%s", MOUNT_POINT, file->name);
 
@@ -416,6 +460,7 @@ esp_err_t SDIO_SD_Read_Data(SDIO_FileConfig *file)
 
         fclose(f);        // Close the file after writing
         open_file = NULL; // Reset the open file name
+        f = NULL;
     }
     else
     {
@@ -437,9 +482,14 @@ esp_err_t SDIO_SD_Close_file(void)
     ret = ESP_OK;
     // Close the file if it is open
     if (fclose(f) == 0)
+    {
         open_file = NULL; // Reset the open file name
+        f = NULL;
+    }
     else
+    {
         ret = ESP_FAIL; // Failed to close file
+    }
     return ret;
 }
 
@@ -564,6 +614,13 @@ uint16_t compare_file_time_days(const char *path)
     return (diff_days);
 }
 
+/**================================================================
+ * @Fn				- SDIO_SD_log_can_message_to_csv
+ * @breif			- Appends Data to a .CSV File Called SDIO_CAN.CSV and last CAN received msgs
+ * @param [in]		- msg: pointer to Buffer storing Received Msg
+ * @retval			- Value indicates the States of SD Card (Anything other that ESP_OK is an Error)
+ * Note				- The file must be created before calling this function
+ */
 esp_err_t SDIO_SD_log_can_message_to_csv(twai_message_t *msg)
 {
     static const char *TAG = "CAN_LOG";

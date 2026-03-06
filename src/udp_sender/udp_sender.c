@@ -168,11 +168,11 @@ void udp_sender_task(void *pvParameters)
             }
         }
 
-        if (++heap_log_counter >= 1000) {
-            size_t free = heap_caps_get_free_size(MALLOC_CAP_DEFAULT);
-            ESP_LOGI(TAG, "Free heap: %lu bytes", (unsigned long)free);
-            heap_log_counter = 0;
-        }
+        // if (++heap_log_counter >= 1000) {
+        //     size_t free = heap_caps_get_free_size(MALLOC_CAP_DEFAULT);
+        //     ESP_LOGI(TAG, "Free heap: %lu bytes", (unsigned long)free);
+        //     heap_log_counter = 0;
+        // }
 
         vTaskDelay(pdMS_TO_TICKS(10));
     }

@@ -1,7 +1,7 @@
 #ifndef TELEMETRY_CONFIG_H
 #define TELEMETRY_CONFIG_H
 
-#define SERVER_IP "41.238.164.247"
+#define SERVER_IP "192.168.1.14"
 #define SERVER_PORT 19132
 
 #define USE_MQTT 1

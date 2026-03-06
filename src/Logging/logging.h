@@ -31,12 +31,27 @@
 //----------------------------
 // SDIO Macros
 //----------------------------
+
+//#define ESP_WROOM_32
+#define ESP32_S3
+
+#ifdef ESP_WROOM_32
 #define CMD 15
 #define CLK 14
 #define D0 2
 #define D1 4
 #define D2 12
 #define D3 13
+#endif
+
+#ifdef ESP32_S3
+#define CMD 35
+#define CLK 36
+#define D0 37
+#define D1 38
+#define D2 19
+#define D3 20
+#endif
 
 #define SDMMC_BUS_WIDTH_4
 
@@ -90,12 +105,12 @@
 */
 typedef enum	
 {
-	COMM_CAN_ID_IMU_ANGLE = 0x004,
-	COMM_CAN_ID_IMU_ACCEL = 0x005,
-	COMM_CAN_ID_ADC = 0x006,
-	COMM_CAN_ID_PROX_ENCODER = 0x007,
-	COMM_CAN_ID_GPS_LATLONG = 0x008,
-	COMM_CAN_ID_TEMP = 0x009,
+	COMM_CAN_ID_IMU_ANGLE = 0x071,
+	COMM_CAN_ID_IMU_ACCEL = 0x072,
+	COMM_CAN_ID_ADC = 0x073,
+	COMM_CAN_ID_PROX_ENCODER = 0x074,
+	COMM_CAN_ID_GPS_LATLONG = 0x075,
+	COMM_CAN_ID_TEMP = 0x076,
 } COMM_CAN_ID_t;
 
 // ADC Readings Structures
@@ -216,4 +231,5 @@ esp_err_t SDIO_SD_Close_file(void);
 esp_err_t SDIO_SD_LOG_CAN_Message(twai_message_t *rx_msg);
 esp_err_t SDIO_SD_log_can_message_to_csv(twai_message_t *msg);
 uint16_t compare_file_time_days(const char *path);
+
 #endif

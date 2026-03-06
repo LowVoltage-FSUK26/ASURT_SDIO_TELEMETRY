@@ -88,8 +88,8 @@ void mqtt_sender_task(void *pvParameters)
             ESP_LOGE(TAG, "Queue receive failed");
             continue;
         }
-        if (xQueueReceive(telemetry_queue, &newer, 0) == pdTRUE)
-            current = newer;
+        // if (xQueueReceive(telemetry_queue, &newer, 0) == pdTRUE)
+        //     current = newer;
 
         if ((xEventGroupGetBits(eg) & WIFI_CONNECTED_BIT) == 0 || !mqtt_connected) {
             if (!warned) {
@@ -104,7 +104,7 @@ void mqtt_sender_task(void *pvParameters)
             continue;
         }
         esp_mqtt_client_publish(client, MQTT_PUB_TOPIC, (const char *)&current, len, 0, 0);
-        vTaskDelay(pdMS_TO_TICKS(10));
+        // vTaskDelay(pdMS_TO_TICKS(10));
     }
 #else
     (void)pvParameters;
