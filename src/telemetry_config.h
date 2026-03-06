@@ -57,6 +57,7 @@ extern const char mqtt_root_ca_pem[];
 
 // FreeRTOS queue depth
 #define QUEUE_SIZE              10
+#define QUEUE_SIZE_SDIO         20   // deeper buffer — absorbs SD write latency spikes
 
 // SD logging: flush to disk every N writes
 #define LOG_FLUSH_EVERY_N_WRITES   5

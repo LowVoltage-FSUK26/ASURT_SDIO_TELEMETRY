@@ -391,7 +391,7 @@ The heartbeat task sends plain JSON and does **not** use this struct.
 | `heartbeat_task` | 0 | 2 | 4 096 B | — |
 | `led_status_task` | 0 | 1 | 2 048 B | — |
 
-Both queues hold **10** frames of `sizeof(twai_message_t)` each (`QUEUE_SIZE`).
+Both queues hold `sizeof(twai_message_t)` frames each: `telemetry_queue` holds **10** (`QUEUE_SIZE`) and `CAN_SDIO_queue_Handler` holds **20** (`QUEUE_SIZE_SDIO`) to absorb SD write latency spikes.
 
 **Core assignment rationale:** CAN acquisition and SD logging run on Core 1 to isolate them from the Wi-Fi/TCP-IP stack (Core 0), minimising jitter in the receive loop.
 
@@ -565,7 +565,7 @@ Both tasks consume from the same `telemetry_queue` and are pinned to Core 0. No 
 | 🟡 Timezone | `TIMEZONE_STR` is currently `"GMT-3"` (Egypt). Change to `"GMT+1"` (BST) for UK Formula Student events. Note POSIX sign convention: `GMT-3` = UTC+3. |
 | 🟠 Incomplete | `SDIO_SD_log_can_message_to_csv()` creates a separate `SDIO_CAN.CSV` for raw CAN debug logging, but is not wired into any task by default. Wire it in for raw-frame debugging sessions. |
 | 🟠 Incomplete | `CONFIG_TELEMETRY_DEBUG_HEAP` and `CONFIG_TELEMETRY_DIAG` are both `0`. Enable them during long-run memory and stack profiling, then disable before competition. |
-| 🔵 Future | Add **dual-core queue separation**: give SDIO its own independent queue depth tuning so a slow SD write never starves the telemetry sender queue. |
+| ✅ Done | **Independent queue depth tuning**: `telemetry_queue` uses `QUEUE_SIZE = 10`, `CAN_SDIO_queue_Handler` uses `QUEUE_SIZE_SDIO = 20` to absorb SD write latency without dropping CAN frames. |
 | 🔵 Future | Consider **pit-side acknowledgement**: the heartbeat JSON currently flows one-way. A lightweight ACK back to the car would confirm live reception before the car leaves the pits. |
 | 🔵 Future | The MQTT TLS certificate (`mqtt_root_ca_pem`) expires **2035-06-04**. Set a calendar reminder to rotate it. |
 

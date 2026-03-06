@@ -211,7 +211,7 @@ void app_main(void)
     ESP_LOGI("Main", "TWAI Driver started");
 
     telemetry_queue = xQueueCreate(QUEUE_SIZE, sizeof(twai_message_t));          /* Stage 8: centralised */
-    CAN_SDIO_queue_Handler = xQueueCreate(QUEUE_SIZE, sizeof(twai_message_t));  /* Stage 8: centralised */
+    CAN_SDIO_queue_Handler = xQueueCreate(QUEUE_SIZE_SDIO, sizeof(twai_message_t));  /* Stage 10: independent depth */
 
     if (telemetry_queue == NULL) // If there is no queue created
     {
