@@ -1,6 +1,8 @@
 #ifndef TELEMETRY_CONFIG_H
 #define TELEMETRY_CONFIG_H
 
+#include "credentials.h"
+
 #define SERVER_IP "192.168.1.14"
 #define SERVER_PORT 19132
 
@@ -8,8 +10,6 @@
 
 #if USE_MQTT
 #define MQTT_URI       "mqtts://5aeaff002e7c423299c2d92361292d54.s1.eu.hivemq.cloud:8883"
-#define MQTT_USER      "yousef"
-#define MQTT_PASS      "Yousef123"
 #define MQTT_PUB_TOPIC "com/yousef/esp32/data"
 extern const char mqtt_root_ca_pem[];
 #endif

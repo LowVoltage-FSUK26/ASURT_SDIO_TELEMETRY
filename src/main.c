@@ -71,11 +71,7 @@ void app_main(void)
    
 
     //==========================================WIFI Implementation (DONE)===========================================
-    // ESP_ERROR_CHECK(wifi_init("Mi A2", "min@fathy2004"));
-    ESP_ERROR_CHECK(wifi_init("AP-yousef", "Mindstranding18"));
-    // ESP_ERROR_CHECK(wifi_init("Home-voda", "Mindstranding18$"));
-    // ESP_ERROR_CHECK(wifi_init("androidhotspotq", "123456788"));
-    // ESP_ERROR_CHECK(wifi_init("Fathy WIFI", "Min@F@thy.2004$$"));
+    ESP_ERROR_CHECK(wifi_init(WIFI_SSID, WIFI_PASS));
 
     /* Wait until connected */
     xEventGroupWaitBits(wifi_event_group(), WIFI_CONNECTED_BIT,
