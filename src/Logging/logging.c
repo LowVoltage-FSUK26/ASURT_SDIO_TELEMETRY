@@ -10,6 +10,7 @@
 
 #include "logging.h"
 #include "../RTC_Time_Sync/rtc_time_sync.h"
+#include "esp_timer.h" /* Stage 4: millisecond-resolution timestamps via esp_timer_get_time() */
 
 /*
  * ================================================================
@@ -17,20 +18,12 @@
  * ================================================================
  *
  * */
-sdmmc_card_t *card;                     /* Holds Mounted SD Card infromation*/
-const char mount_point[] = MOUNT_POINT; /* Holds the data path of the SD card*/
-FILE *f = NULL;                         /* File object for SD */
-
-/*
- * ================================================================
- * 							File I/O Variables
- * ================================================================
- *
- * */
-static esp_err_t ret;           /* Fatfas functions common result code */
-static char *open_file = NULL;  /* Holds the name of Currently opened file */
-uint32_t bytewritten, byteread; /* File Write/Read counters */
-uint8_t writes_Num = 0;
+/* Stage 4: module-level state — only variables that genuinely persist across calls */
+static sdmmc_card_t *card;                     /* Holds mounted SD card information */
+static const char mount_point[] = MOUNT_POINT; /* Data path of the SD card */
+static FILE *f = NULL;                         /* Currently open file handle */
+static char *open_file = NULL;                 /* Name of currently opened file */
+static uint8_t writes_Num = 0;                 /* Write-batch counter for periodic flush */
 
 /*
  * ================================================================
@@ -48,7 +41,7 @@ uint8_t writes_Num = 0;
  */
 esp_err_t SDIO_SD_Init(void)
 {
-    ret = ESP_OK;
+    esp_err_t ret = ESP_OK; /* Stage 4: local return code instead of module-level static */
 
     // Options for mounting the filesystem.
     esp_vfs_fat_sdmmc_mount_config_t mount_config = {
@@ -129,7 +122,7 @@ esp_err_t SDIO_SD_Init(void)
  */
 esp_err_t SDIO_SD_DeInit(void)
 {
-    ret = ESP_OK;
+    esp_err_t ret = ESP_OK; /* Stage 4: local return code */
     if (open_file != NULL && f != NULL)
         fclose(f);
     ret = esp_vfs_fat_sdcard_unmount(mount_point, card);
@@ -147,7 +140,7 @@ esp_err_t SDIO_SD_DeInit(void)
  */
 esp_err_t SDIO_SD_Create_Write_File(SDIO_FileConfig *file, SDIO_TxBuffer *pTxBuffer)
 {
-    ret = ESP_OK;
+    esp_err_t ret = ESP_OK; /* Stage 4: local return code */
     static const char *TAG = "SDIO_SD_Create_Write_File";
     // Check if another file is already opened
     if (open_file != NULL && f != NULL)
@@ -158,12 +151,18 @@ esp_err_t SDIO_SD_Create_Write_File(SDIO_FileConfig *file, SDIO_TxBuffer *pTxBuf
     }
     snprintf(file->path, sizeof(file->path), "%s/%s", MOUNT_POINT, file->name);
 
-    // Get current Time
-    char time_buffer[32];
-    if (Time_Sync_get_rtc_time_str(time_buffer, sizeof(time_buffer)) != true)
+    /* Stage 4: millisecond-resolution timestamp using esp_timer for the ms fraction */
+    char time_buffer[36];
     {
-        ESP_LOGE("RTC", "Failed to get time.");
-        strcpy(time_buffer, "XXXX-XX-XX XX:XX:XX");
+        char base_time[24];
+        if (Time_Sync_get_rtc_time_str(base_time, sizeof(base_time)) != true)
+        {
+            ESP_LOGE("RTC", "Failed to get time.");
+            strcpy(base_time, "XXXX-XX-XX XX:XX:XX");
+        }
+        /* Append milliseconds from the high-resolution timer */
+        uint32_t ms = (uint32_t)((esp_timer_get_time() / 1000ULL) % 1000ULL);
+        snprintf(time_buffer, sizeof(time_buffer), "%s.%03lu", base_time, (unsigned long)ms);
     }
 
     // Check if the files exists and Modification Time less than 2 days
@@ -196,7 +195,7 @@ esp_err_t SDIO_SD_Create_Write_File(SDIO_FileConfig *file, SDIO_TxBuffer *pTxBuf
         if (file->type == TXT)
         {
             // Write string to file
-            bytewritten = fprintf(f, "%s\n", pTxBuffer->string);
+            uint32_t bytewritten = fprintf(f, "%s\n", pTxBuffer->string); /* Stage 4: local bytewritten */
             if ((bytewritten == 0) || ret != ESP_OK)
             {
                 ret = ESP_ERR_NOT_FINISHED;
@@ -206,24 +205,23 @@ esp_err_t SDIO_SD_Create_Write_File(SDIO_FileConfig *file, SDIO_TxBuffer *pTxBuf
         }
         else if (file->type == CSV)
         {
-
-            // Write CSV header to file
+            /* Stage 4: CSV header with units, added SPEED_kmh, fixed GPS order (Lat,Lon) */
             fprintf(f, "Timestamp,Label,"
-                       "SUS_1,SUS_2,SUS_3,SUS_4,"
-                       "PRESSURE_1,PRESSURE_2,"
+                       "SUS_1_raw,SUS_2_raw,SUS_3_raw,SUS_4_raw,"
+                       "PRESSURE_1_raw,PRESSURE_2_raw,"
                        "RPM_FL,RPM_FR,RPM_RL,RPM_RR,"
-                       "ENC_ANGLE,"
+                       "ENC_ANGLE_raw,SPEED_kmh,"
                        "IMU_Ang_X,IMU_Ang_Y,IMU_Ang_Z,"
                        "IMU_Accel_X,IMU_Accel_Y,IMU_Accel_Z,"
-                       "Temp_FL,Temp_FR,Temp_RL,Temp_RR,"
-                       "GPS_Long, GPS_Lat\n");
+                       "Temp_FL_raw,Temp_FR_raw,Temp_RL_raw,Temp_RR_raw,"
+                       "GPS_Lat,GPS_Lon\n");
 
-            // Write formatted data to file
-            bytewritten = fprintf(f, "%s,%s,"
+            /* Stage 4: data row — added Speedkmh after ENCODER_angle, GPS order: lat then lon */
+            uint32_t bytewritten = fprintf(f, "%s,%s,"
                                      "%u,%u,%u,%u,"
                                      "%u,%u,"
                                      "%u,%u,%u,%u,"
-                                     "%u,"
+                                     "%u,%u,"
                                      "%u,%u,%u,"
                                      "%u,%u,%u,"
                                      "%u,%u,%u,%u,"
@@ -244,6 +242,7 @@ esp_err_t SDIO_SD_Create_Write_File(SDIO_FileConfig *file, SDIO_TxBuffer *pTxBuf
                                   pTxBuffer->prox_encoder.RPM_rear_left,
                                   pTxBuffer->prox_encoder.RPM_rear_right,
                                   pTxBuffer->prox_encoder.ENCODER_angle,
+                                  pTxBuffer->prox_encoder.Speedkmh, /* Stage 4: Speed_kmh was missing */
 
                                   pTxBuffer->imu_ang.x,
                                   pTxBuffer->imu_ang.y,
@@ -258,8 +257,8 @@ esp_err_t SDIO_SD_Create_Write_File(SDIO_FileConfig *file, SDIO_TxBuffer *pTxBuf
                                   pTxBuffer->temp.Temp_rear_left,
                                   pTxBuffer->temp.Temp_rear_right,
 
-                                  pTxBuffer->gps.longitude,
-                                  pTxBuffer->gps.latitude);
+                                  pTxBuffer->gps.latitude,   /* Stage 4: GPS order fixed — lat first */
+                                  pTxBuffer->gps.longitude); /* Stage 4: then lon to match header */
 
             if ((bytewritten == 0) || ret != ESP_OK)
             {
@@ -327,19 +326,24 @@ esp_err_t SDIO_SD_Add_Data(SDIO_FileConfig *file, SDIO_TxBuffer *pTxBuffer)
             
             open_file = file->name; // Assign the name of the opened file
       
-            // Get current Time
-            char time_buffer[32];
-            if (Time_Sync_get_rtc_time_str(time_buffer, sizeof(time_buffer)) != true)
+            /* Stage 4: millisecond-resolution timestamp for append path */
+            char time_buffer[36];
             {
-                ESP_LOGE("RTC", "Failed to get time.");
-                strcpy(time_buffer, "XXXXXXXX");
+                char base_time[24];
+                if (Time_Sync_get_rtc_time_str(base_time, sizeof(base_time)) != true)
+                {
+                    ESP_LOGE("RTC", "Failed to get time.");
+                    strcpy(base_time, "XXXX-XX-XX XX:XX:XX");
+                }
+                uint32_t ms = (uint32_t)((esp_timer_get_time() / 1000ULL) % 1000ULL);
+                snprintf(time_buffer, sizeof(time_buffer), "%s.%03lu", base_time, (unsigned long)ms);
             }
 
             // Check if file type is .TXT or .CSV
             if (file->type == TXT)
             {
                 // Write string to file
-                bytewritten = fprintf(f, "%s\n", pTxBuffer->string);
+                uint32_t bytewritten = fprintf(f, "%s\n", pTxBuffer->string); /* Stage 4: local bytewritten */
                 if ((bytewritten == 0) || ret != ESP_OK)
                 {
                     ret = ESP_ERR_NOT_FINISHED;
@@ -348,12 +352,12 @@ esp_err_t SDIO_SD_Add_Data(SDIO_FileConfig *file, SDIO_TxBuffer *pTxBuffer)
             }
             else if (file->type == CSV)
             {
-                // Write formatted data to file
-                bytewritten = fprintf(f, "%s,%s,"
+                /* Stage 4: data row — added Speedkmh, GPS order fixed (lat, lon) */
+                uint32_t bytewritten = fprintf(f, "%s,%s,"
                                          "%u,%u,%u,%u,"
                                          "%u,%u,"
                                          "%u,%u,%u,%u,"
-                                         "%u,"
+                                         "%u,%u,"
                                          "%u,%u,%u,"
                                          "%u,%u,%u,"
                                          "%u,%u,%u,%u,"
@@ -374,6 +378,7 @@ esp_err_t SDIO_SD_Add_Data(SDIO_FileConfig *file, SDIO_TxBuffer *pTxBuffer)
                                       pTxBuffer->prox_encoder.RPM_rear_left,
                                       pTxBuffer->prox_encoder.RPM_rear_right,
                                       pTxBuffer->prox_encoder.ENCODER_angle,
+                                      pTxBuffer->prox_encoder.Speedkmh, /* Stage 4: Speed_kmh was missing */
 
                                       pTxBuffer->imu_ang.x,
                                       pTxBuffer->imu_ang.y,
@@ -388,8 +393,8 @@ esp_err_t SDIO_SD_Add_Data(SDIO_FileConfig *file, SDIO_TxBuffer *pTxBuffer)
                                       pTxBuffer->temp.Temp_rear_left,
                                       pTxBuffer->temp.Temp_rear_right,
 
-                                      pTxBuffer->gps.longitude,
-                                      pTxBuffer->gps.latitude);
+                                      pTxBuffer->gps.latitude,   /* Stage 4: GPS order fixed — lat first */
+                                      pTxBuffer->gps.longitude); /* Stage 4: then lon to match header */
 
                 if ((bytewritten == 0) || ret != ESP_OK)
                 {
@@ -427,8 +432,13 @@ esp_err_t SDIO_SD_Add_Data(SDIO_FileConfig *file, SDIO_TxBuffer *pTxBuffer)
  * @retval			- Value indicates the States of SD Card (Anything other that ESP_OK is an Error)
  * Note				- Used Only for Debuging with UART
  */
+/* Stage 4: debug-only function — guarded by CONFIG_SDIO_DEBUG_READ.
+ * WARNING: This dumps the entire file over UART and is very slow. */
+#if CONFIG_SDIO_DEBUG_READ
 esp_err_t SDIO_SD_Read_Data(SDIO_FileConfig *file)
 {
+    esp_err_t ret = ESP_OK; /* Stage 4: local return code */
+    ESP_LOGW("SDIO", "SDIO_SD_Read_Data is debug-only and slow — disable CONFIG_SDIO_DEBUG_READ in production");
     if (open_file != NULL)
     {
         fclose(f);        // close the previously opened file
@@ -444,24 +454,19 @@ esp_err_t SDIO_SD_Read_Data(SDIO_FileConfig *file)
 
         if (f == NULL)
         {
-            ret = ESP_FAIL; // Failed to open file for writing
+            ret = ESP_FAIL; // Failed to open file for reading
         }
         else
         {
             open_file = file->name; // Assign the name of the opened file
-            char line[MAX_CHAR_SIZE];
+            char line[MAX_LINE_SIZE]; /* Stage 4: was MAX_CHAR_SIZE (64), now 256 for CSV rows */
             while (fgets(line, sizeof(line), f))
             {
-                // Strip newline character if present
-                /*
-                char *pos = strchr(line, '\n');
-                if (pos) *pos = '\0';
-                 */
                 printf("%s", line);
             }
         }
 
-        fclose(f);        // Close the file after writing
+        fclose(f);        // Close the file after reading
         open_file = NULL; // Reset the open file name
         f = NULL;
     }
@@ -472,6 +477,7 @@ esp_err_t SDIO_SD_Read_Data(SDIO_FileConfig *file)
 
     return ret;
 }
+#endif /* CONFIG_SDIO_DEBUG_READ */
 
 /**================================================================
  * @Fn				- SDIO_SD_Close_file
@@ -482,7 +488,7 @@ esp_err_t SDIO_SD_Read_Data(SDIO_FileConfig *file)
  */
 esp_err_t SDIO_SD_Close_file(void)
 {
-    ret = ESP_OK;
+    esp_err_t ret = ESP_OK; /* Stage 4: local return code */
     if (f == NULL) return ESP_OK;
     // Close the file if it is open
     if (fclose(f) == 0)

@@ -33,26 +33,9 @@
 // SDIO Macros
 //----------------------------
 
-//#define ESP_WROOM_32
-#define ESP32_S3
-
-#ifdef ESP_WROOM_32
-#define CMD 15
-#define CLK 14
-#define D0 2
-#define D1 4
-#define D2 12
-#define D3 13
-#endif
-
-#ifdef ESP32_S3
-#define CMD 35
-#define CLK 36
-#define D0 37
-#define D1 38
-#define D2 19
-#define D3 20
-#endif
+/* Stage 4: removed ESP_WROOM_32 / ESP32_S3 pin macros (CMD, CLK, D0–D3).
+ * They were unused — actual pin config is in logging.c via GPIO_NUM_xx.
+ * Pin definitions will move to telemetry_config.h in Stage 8. */
 
 #define SDMMC_BUS_WIDTH_4
 
@@ -72,9 +55,16 @@
 								__VA_ARGS__.imu_accel.x = 0;\
 								__VA_ARGS__.imu_accel.y = 0;\
 								__VA_ARGS__.imu_accel.z = 0;\
+								__VA_ARGS__.temp.Temp_front_left = 0;  /* Stage 4: zero temp fields */\
+								__VA_ARGS__.temp.Temp_front_right = 0; /* Stage 4: zero temp fields */\
+								__VA_ARGS__.temp.Temp_rear_left = 0;   /* Stage 4: zero temp fields */\
+								__VA_ARGS__.temp.Temp_rear_right = 0;  /* Stage 4: zero temp fields */\
+								__VA_ARGS__.gps.longitude = 0.0f;      /* Stage 4: zero GPS fields */\
+								__VA_ARGS__.gps.latitude = 0.0f;       /* Stage 4: zero GPS fields */
 
 
-#define MAX_CHAR_SIZE 64
+/* Stage 4: increased from MAX_CHAR_SIZE 64 — CSV rows can exceed 64 chars */
+#define MAX_LINE_SIZE 256
 #define MOUNT_POINT "/sdcard"
 #define MAX_WRITES 	5
 #define EXAMPLE_IS_UHS1 (CONFIG_EXAMPLE_SDMMC_SPEED_UHS_I_SDR50 || CONFIG_EXAMPLE_SDMMC_SPEED_UHS_I_DDR50)
@@ -227,9 +217,11 @@ esp_err_t SDIO_SD_Init(void);
 esp_err_t SDIO_SD_DeInit(void);
 esp_err_t SDIO_SD_Create_Write_File(SDIO_FileConfig *file, SDIO_TxBuffer *pTxBuffer);
 esp_err_t SDIO_SD_Add_Data(SDIO_FileConfig *file, SDIO_TxBuffer *pTxBuffer);
+#if CONFIG_SDIO_DEBUG_READ /* Stage 4: guarded behind debug flag */
 esp_err_t SDIO_SD_Read_Data(SDIO_FileConfig *file);
+#endif
 esp_err_t SDIO_SD_Close_file(void);
-esp_err_t SDIO_SD_LOG_CAN_Message(twai_message_t *rx_msg);
+/* Stage 4: SDIO_SD_LOG_CAN_Message removed — layering violation (called twai_receive) */
 esp_err_t SDIO_SD_log_can_message_to_csv(twai_message_t *msg);
 uint16_t compare_file_time_days(const char *path);
 
