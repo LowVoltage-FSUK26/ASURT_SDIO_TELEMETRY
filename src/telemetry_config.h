@@ -3,6 +3,17 @@
 
 #include "credentials.h"
 
+// ── Master Feature Flags ────────────────────────────────────────
+// Subsystem enable/disable (1 = enabled, 0 = disabled).
+// Set any flag to 0 to compile out that subsystem entirely,
+// allowing bench testing without all hardware connected.
+#define USE_WIFI     1   // Wi-Fi init, telemetry tasks, connectivity monitor
+#define USE_SDIO     1   // SD card init and logging task
+#define USE_CAN      1   // TWAI driver install and CAN receive task
+#define USE_RTC_SYNC 1   // SNTP time sync (requires USE_WIFI=1)
+// USE_MQTT is defined below — it only applies when USE_WIFI=1
+// ────────────────────────────────────────────────────────────────
+
 #define SERVER_IP "192.168.1.14"
 #define SERVER_PORT 19132
 

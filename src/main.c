@@ -1,15 +1,28 @@
 //==================================RTOS Libraries Includes==========================//
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-#include "wifi_manager/wifi_manager.h"
-
-#include "logging/logging.h"
-#include "driver/twai.h"
-#include "RTC_Time_Sync/rtc_time_sync.h"
 #include "telemetry_config.h"
+#include "logging/logging.h"
+
+/* Stage 3: Conditionally include headers based on feature flags.
+ * This avoids pulling in driver headers for disabled subsystems. */
+#if USE_WIFI
+#include "wifi_manager/wifi_manager.h"
 #include "connectivity/connectivity.h"
-#include "udp_sender/udp_sender.h"
-#include "mqtt_sender/mqtt_sender.h"
+  #if USE_MQTT
+  #include "mqtt_sender/mqtt_sender.h"
+  #else
+  #include "udp_sender/udp_sender.h"
+  #endif
+#endif
+
+#if USE_CAN
+#include "driver/twai.h"
+#endif
+
+#if USE_RTC_SYNC
+#include "RTC_Time_Sync/rtc_time_sync.h"
+#endif
 
 #define LED_GPIO 2 // GPIO pin for the LED
 #define Queue_Size 10
@@ -21,12 +34,15 @@
  *
  * */
 
+/* Stage 3: SDIO globals only needed when SD card logging is enabled. */
+#if USE_SDIO
 // Debug Varibales
 SDIO_FileConfig SDIO_test;
 SDIO_FileConfig SDIO_txt;
 SDIO_TxBuffer buffer;
 SDIO_FileConfig LOG_CSV;
 SDIO_TxBuffer SDIO_buffer;
+#endif
 
 /*
  * ================================================================
@@ -34,6 +50,8 @@ SDIO_TxBuffer SDIO_buffer;
  * ================================================================
  *
  * */
+/* Stage 3: TWAI (CAN) config structs only compiled when CAN is enabled. */
+#if USE_CAN
 // 1. Configure TWAI with pins from your ESP32 pinout
 twai_general_config_t g_config = {
     .mode = TWAI_MODE_NORMAL,
@@ -48,6 +66,7 @@ twai_general_config_t g_config = {
 twai_timing_config_t t_config = TWAI_TIMING_CONFIG_125KBITS();
 
 twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
+#endif
 
 /*
  * ================================================================
@@ -55,22 +74,27 @@ twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
  * ================================================================
  *
  * */
-// Define Queue Handler
+/* Stage 3: Queue handles and task declarations guarded by their respective flags.
+ * telemetry_queue bridges CAN → network, so it needs both CAN and WIFI.
+ * CAN_SDIO_queue_Handler bridges CAN → SD logging, so it needs both. */
+#if USE_CAN
 QueueHandle_t CAN_SDIO_queue_Handler;
 QueueHandle_t telemetry_queue;
-
-// Define Tasks Handler to hold task ID
 TaskHandle_t CAN_Receive_TaskHandler;
-TaskHandle_t SDIO_Log_TaskHandler;
-
-// Declare Tasks Entery point
 void CAN_Receive_Task_init(void *pvParameters);
+#endif
+
+#if USE_SDIO
+TaskHandle_t SDIO_Log_TaskHandler;
 void SDIO_Log_Task_init(void *pvParameters);
+#endif
 void app_main(void)
 {
    
 
     //==========================================WIFI Implementation (DONE)===========================================
+    /* Stage 3: Wi-Fi init only when USE_WIFI is enabled. */
+#if USE_WIFI
     ESP_ERROR_CHECK(wifi_init(WIFI_SSID, WIFI_PASS));
 
     /* Wait until connected */
@@ -78,8 +102,13 @@ void app_main(void)
                         pdFALSE, pdFALSE, portMAX_DELAY);
 
     ESP_LOGI("WIFI", "Connected to WiFi!");
+#endif /* USE_WIFI */
+
     //==========================================RTC_Time_Sync Implementation (DONE)===========================================
+    /* Stage 3: RTC sync requires Wi-Fi for SNTP, so guard with both flags. */
+#if USE_WIFI && USE_RTC_SYNC
     Time_Sync_obtain_time();
+#endif /* USE_WIFI && USE_RTC_SYNC */
 
     //@debug
     ESP_LOGI("Main", "Initializing");
@@ -88,7 +117,8 @@ void app_main(void)
     vTaskDelay(pdMS_TO_TICKS(3000));
 
     //==========================================SDIO Implementation (DONE)===========================================
-
+    /* Stage 3: Entire SDIO init block guarded by USE_SDIO. */
+#if USE_SDIO
     // static const char *TAG = "SDIO";
     // esp_err_t ret;
     // ret = SDIO_SD_Init();
@@ -206,11 +236,14 @@ void app_main(void)
     // All done, unmount partition and disable SDMMC peripheral
     if (SDIO_SD_DeInit() == ESP_OK)
         ESP_LOGI(TAG, "Card unmounted successfully"); */
+#endif /* USE_SDIO */
 
     //==========================================RTOS Implementation (Semaphore can be added)===========================================
 
     //=======================Create Queue====================//
 
+    /* Stage 3: TWAI driver + CAN queues only needed when CAN is enabled. */
+#if USE_CAN
     if (twai_driver_install(&g_config, &t_config, &f_config) != ESP_OK)
     {
         ESP_LOGE("Main", "Failed to install TWAI driver");
@@ -240,46 +273,67 @@ void app_main(void)
     //     ESP_LOGE("RTOS", "Unable to Create Structure Queue");
     //     vTaskDelay(pdMS_TO_TICKS(1000));
     // }
+#endif /* USE_CAN */
 
     //=============Define Tasks=================//
     // --- Data Acquisition Tasks on Core 1 ---
+    /* Stage 3: CAN receive task only when CAN subsystem is enabled. */
+#if USE_CAN
     BaseType_t result_CAN = xTaskCreatePinnedToCore((TaskFunction_t)CAN_Receive_Task_init, "CAN_Receive_Task", 4096, NULL, (UBaseType_t)4, &CAN_Receive_TaskHandler, 1); // <-- Priority 4
+#endif
+
+    /* Stage 3: SDIO log task needs both SDIO and CAN (data source).
+     * Still commented out internally — that's fine, the guard is in place
+     * for when it gets re-enabled. */
+#if USE_SDIO && USE_CAN
     // BaseType_t result_SDIO = xTaskCreatePinnedToCore((TaskFunction_t)SDIO_Log_Task_init, "SDIO_Log_Task", 4096, NULL, (UBaseType_t)3, &SDIO_Log_TaskHandler, 1);         // <-- Core 1, Priority 3
+#endif
 
     // --- Network Tasks on Core 0 ---
-#if USE_MQTT
+    /* Stage 3: All network tasks (MQTT/UDP sender + connectivity monitor)
+     * are only meaningful when Wi-Fi is enabled. */
+#if USE_WIFI
+  #if USE_MQTT
     BaseType_t result_MQT = xTaskCreatePinnedToCore(mqtt_sender_task, "mqtt_sender", 4096, telemetry_queue, 3, NULL, 0); // <-- Core 0
-#else
+  #else
     BaseType_t result_UDP = xTaskCreatePinnedToCore(udp_sender_task, "udp_sender", 4096, telemetry_queue, 3, NULL, 0); // <-- Core 0
-#endif
+  #endif
     BaseType_t result_ConMon = xTaskCreatePinnedToCore(connectivity_monitor_task, "conn_monitor", 4096, NULL, 3, NULL, 0); // <-- Core 0
+#endif /* USE_WIFI */
+
     printf("========================================\n\n");
+
     // if (result_SDIO == pdPASS)
     //     ESP_LOGI("SDIO_Log_Task", "Task created successfully");
     // else
     //     ESP_LOGE("SDIO_Log_Task", "Task creation failed");
 
+    /* Stage 3: Task creation result logging matches the guards above. */
+#if USE_CAN
     if (result_CAN == pdPASS)
         ESP_LOGI("CAN_Receive_Task", "Task created successfully");
     else
         ESP_LOGE("CAN_Receive_Task", "Task creation failed");
+#endif
 
-#if USE_MQTT
+#if USE_WIFI
+  #if USE_MQTT
     if (result_MQT == pdPASS)
         ESP_LOGI("mqtt_sender", "Task created successfully");
     else
         ESP_LOGE("mqtt_sender", "Task creation failed");
-#else
+  #else
     if (result_UDP == pdPASS)
         ESP_LOGI("udp_sender", "Task created successfully");
     else
         ESP_LOGE("udp_sender", "Task creation failed");
-#endif
+  #endif
 
     if (result_ConMon == pdPASS)
         ESP_LOGI("conn_monitor", "Task created successfully");
     else
         ESP_LOGE("conn_monitor", "Task creation failed");
+#endif /* USE_WIFI */
 
     printf("========================================\n\n");
 
@@ -290,6 +344,8 @@ void app_main(void)
     }
 }
 
+/* Stage 3: Entire CAN receive task body compiled out when CAN is disabled. */
+#if USE_CAN
 void CAN_Receive_Task_init(void *pvParameters) // DONE
 {
     const char *TAG = "CAN_Receive_Task";
@@ -343,6 +399,8 @@ void CAN_Receive_Task_init(void *pvParameters) // DONE
         // vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
+#endif /* USE_CAN */
+
 // void SDIO_Log_Task_init(void *pvParameters) // WORKS! Needs testing
 // {
 
