@@ -64,6 +64,26 @@ extern const char mqtt_root_ca_pem[];
 // SD logging: max age (days) before rotating to a new session file
 #define MAX_DAYS_MODIFIED          2
 
+// ── Stage 9: Quality-of-life & diagnostic config ───────────────
+
+// LED status indicator GPIO (on-board LED on most ESP32 devkits)
+#define LED_GPIO                GPIO_NUM_2
+
+// RTOS config for new Stage 9 tasks
+#define TASK_STACK_LED          2048
+#define TASK_STACK_HEARTBEAT    4096
+#define TASK_PRIO_LED           1      // lowest priority — purely cosmetic
+#define TASK_PRIO_HEARTBEAT     2
+
+// Heartbeat publish interval (ms)
+#define HEARTBEAT_INTERVAL_MS   5000
+
+// Set to 1 during development to log heap usage in udp_sender
+#define CONFIG_TELEMETRY_DEBUG_HEAP  0
+
+// Set to 1 during development to log stack high-water marks 30 s after boot
+#define CONFIG_TELEMETRY_DIAG       0
+
 // ────────────────────────────────────────────────────────────────
 
 #endif // TELEMETRY_CONFIG_H

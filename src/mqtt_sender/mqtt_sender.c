@@ -14,6 +14,10 @@ static const char *TAG = "mqtt_sender";
 static bool mqtt_connected;
 static uint32_t mqtt_seq = 0;  /* Stage 6: rolling sequence number for drop detection */
 
+/* Stage 9: Shared MQTT client handle so the heartbeat task can publish
+ * on the same broker connection without creating a second TLS session. */
+esp_mqtt_client_handle_t mqtt_heartbeat_client = NULL;
+
 #if USE_MQTT
 const char mqtt_root_ca_pem[] =
 "-----BEGIN CERTIFICATE-----\n"
@@ -83,6 +87,9 @@ void mqtt_sender_task(void *pvParameters)
     esp_mqtt_client_handle_t client = esp_mqtt_client_init(&cfg);
     esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
     esp_mqtt_client_start(client);
+
+    /* Stage 9: Expose client handle for heartbeat task to publish on */
+    mqtt_heartbeat_client = client;
 
     twai_message_t current, newer;
     bool warned = false;

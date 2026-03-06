@@ -182,12 +182,30 @@ void udp_sender_task(void *pvParameters)
             }
         }
 
-        // if (++heap_log_counter >= 1000) {
-        //     size_t free = heap_caps_get_free_size(MALLOC_CAP_DEFAULT);
-        //     ESP_LOGI(TAG, "Free heap: %lu bytes", (unsigned long)free);
-        //     heap_log_counter = 0;
-        // }
+        // if (xQueueReceive(telemetry_queue, &newer, 0) == pdTRUE)
+        //     current = newer;
+
+        /* Stage 9: Guarded heap monitoring — enable via CONFIG_TELEMETRY_DEBUG_HEAP=1
+         * in telemetry_config.h. Logs free heap every ~1000 send cycles. */
+#if CONFIG_TELEMETRY_DEBUG_HEAP
+        if (++heap_log_counter >= 1000) {
+            ESP_LOGI(TAG, "Free heap: %lu bytes",
+                     (unsigned long)heap_caps_get_free_size(MALLOC_CAP_DEFAULT));
+            heap_log_counter = 0;
+        }
+#endif
 
         vTaskDelay(pdMS_TO_TICKS(10));
     }
+}
+
+/* Stage 9: Helper for heartbeat task to send a JSON packet over the shared UDP socket */
+void udp_send_heartbeat(const char *data, int len)
+{
+    if (udp_sock < 0 || !udp_mutex) return;
+
+    xSemaphoreTake(udp_mutex, portMAX_DELAY);
+    sendto(udp_sock, data, len, 0,
+           (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+    xSemaphoreGive(udp_mutex);
 }

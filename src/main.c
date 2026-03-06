@@ -24,8 +24,12 @@
 #include "RTC_Time_Sync/rtc_time_sync.h"
 #endif
 
-// TODO: wire LED_GPIO to actual status-blink logic or remove entirely
-// #define LED_GPIO 2
+/* Stage 9: LED status indicator + heartbeat diagnostics */
+#include "driver/gpio.h"
+#include "esp_timer.h"
+#include "esp_heap_caps.h"
+#include <stdio.h>
+#include <string.h>
 
 /*
  * ================================================================
@@ -84,6 +88,26 @@ void CAN_Receive_Task_init(void *pvParameters);
 #if USE_SDIO
 TaskHandle_t SDIO_Log_TaskHandler;
 void SDIO_Log_Task_init(void *pvParameters);
+#endif
+
+/* Stage 9: LED status task — blink pattern conveys system state at a glance */
+TaskHandle_t LED_Status_TaskHandler;
+void led_status_task(void *pvParameters);
+
+/* Stage 9: Heartbeat task — publishes periodic system-health JSON */
+#if USE_WIFI
+TaskHandle_t Heartbeat_TaskHandler;
+void heartbeat_task(void *pvParameters);
+#endif
+
+/* Stage 9: Shared diagnostic counters (updated by CAN task, read by heartbeat) */
+#if USE_CAN
+volatile uint32_t g_can_frame_count = 0;  /* total CAN frames received since boot */
+#endif
+
+/* Stage 9: SD card health flag (set false on permanent SDIO failure) */
+#if USE_SDIO
+volatile bool g_sd_ok = true;
 #endif
 void app_main(void)
 {
@@ -230,7 +254,15 @@ void app_main(void)
   #endif
     BaseType_t result_ConMon = xTaskCreatePinnedToCore(connectivity_monitor_task, "conn_monitor",
                         TASK_STACK_CONN_MON, NULL, TASK_PRIO_CONN_MON, NULL, 0); /* Stage 8: centralised */
+
+    /* Stage 9: Heartbeat task — publishes system health every HEARTBEAT_INTERVAL_MS */
+    BaseType_t result_HB = xTaskCreatePinnedToCore(heartbeat_task, "heartbeat",
+                        TASK_STACK_HEARTBEAT, NULL, TASK_PRIO_HEARTBEAT, &Heartbeat_TaskHandler, 0);
 #endif /* USE_WIFI */
+
+    /* Stage 9: LED status indicator task — runs on Core 0 at lowest priority */
+    BaseType_t result_LED = xTaskCreatePinnedToCore(led_status_task, "led_status",
+                        TASK_STACK_LED, NULL, TASK_PRIO_LED, &LED_Status_TaskHandler, 0);
 
     printf("========================================\n\n");
 
@@ -267,13 +299,44 @@ void app_main(void)
         ESP_LOGI("conn_monitor", "Task created successfully");
     else
         ESP_LOGE("conn_monitor", "Task creation failed");
+
+    /* Stage 9: Heartbeat task creation result */
+    if (result_HB == pdPASS)
+        ESP_LOGI("heartbeat", "Task created successfully");
+    else
+        ESP_LOGE("heartbeat", "Task creation failed");
 #endif /* USE_WIFI */
+
+    /* Stage 9: LED task creation result */
+    if (result_LED == pdPASS)
+        ESP_LOGI("led_status", "Task created successfully");
+    else
+        ESP_LOGE("led_status", "Task creation failed");
 
     printf("========================================\n\n");
 
+    /* Stage 9: One-shot stack high-water mark diagnostics — helps right-size stacks.
+     * Only compiled when CONFIG_TELEMETRY_DIAG=1 in telemetry_config.h. */
+#if CONFIG_TELEMETRY_DIAG
+    vTaskDelay(pdMS_TO_TICKS(30000)); /* wait 30 s for tasks to settle */
+  #if USE_CAN
+    ESP_LOGI("DIAG", "CAN task HWM: %u words",
+             (unsigned)uxTaskGetStackHighWaterMark(CAN_Receive_TaskHandler));
+  #endif
+  #if USE_SDIO && USE_CAN
+    ESP_LOGI("DIAG", "SDIO task HWM: %u words",
+             (unsigned)uxTaskGetStackHighWaterMark(SDIO_Log_TaskHandler));
+  #endif
+    ESP_LOGI("DIAG", "LED task HWM: %u words",
+             (unsigned)uxTaskGetStackHighWaterMark(LED_Status_TaskHandler));
+  #if USE_WIFI
+    ESP_LOGI("DIAG", "Heartbeat task HWM: %u words",
+             (unsigned)uxTaskGetStackHighWaterMark(Heartbeat_TaskHandler));
+  #endif
+#endif /* CONFIG_TELEMETRY_DIAG */
+
     while (1)
     {
-
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
@@ -299,6 +362,9 @@ void CAN_Receive_Task_init(void *pvParameters) // DONE
         {
             // Reset counter on successful receive
             timeout_counter = 0;
+
+            /* Stage 9: Increment global CAN frame counter for heartbeat diagnostics */
+            g_can_frame_count++;
 
             /* Stage 5: Dual-queue CAN fan-out — non-blocking sends (tick=0)
              * so CAN reception is never stalled by a full queue. */
@@ -492,6 +558,8 @@ void SDIO_Log_Task_init(void *pvParameters)
             {
                 /* Stage 5: Permanent failure — unmount and park the task */
                 SDIO_SD_DeInit();
+                /* Stage 9: Signal permanent SD failure to heartbeat/LED tasks */
+                g_sd_ok = false;
                 while (1)
                 {
                     ESP_LOGE(TAG, "SDIO_Logging is Down");
@@ -508,3 +576,154 @@ void SDIO_Log_Task_init(void *pvParameters)
     }
 }
 #endif /* USE_SDIO && USE_CAN */
+
+/* ================================================================
+ * Stage 9: LED status indicator task
+ * ================================================================
+ * Blink patterns communicate system state without requiring a serial console:
+ *   Fast blink  (100 ms) : Wi-Fi connecting
+ *   Slow blink  (1000 ms): Wi-Fi connected, system nominal
+ *   Double-blink          : SD card error
+ *   Solid on              : CAN receiving data (toggled on each frame batch)
+ */
+void led_status_task(void *pvParameters)
+{
+    const char *TAG = "led_status";
+    ESP_LOGI(TAG, "LED status task running on core %d", xPortGetCoreID());
+
+    /* Stage 9: Configure LED_GPIO as push-pull output */
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << LED_GPIO),
+        .mode         = GPIO_MODE_OUTPUT,
+        .pull_up_en   = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type    = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&io_conf);
+    gpio_set_level(LED_GPIO, 0);
+
+#if USE_CAN
+    uint32_t prev_can_count = 0; /* Stage 9: track CAN activity */
+#endif
+
+    while (1)
+    {
+#if USE_SDIO
+        /* Stage 9: Double-blink pattern when SD card has permanently failed */
+        if (!g_sd_ok)
+        {
+            /* Double blink: ON-OFF-ON-OFF then pause */
+            gpio_set_level(LED_GPIO, 1); vTaskDelay(pdMS_TO_TICKS(80));
+            gpio_set_level(LED_GPIO, 0); vTaskDelay(pdMS_TO_TICKS(80));
+            gpio_set_level(LED_GPIO, 1); vTaskDelay(pdMS_TO_TICKS(80));
+            gpio_set_level(LED_GPIO, 0); vTaskDelay(pdMS_TO_TICKS(760));
+            continue;
+        }
+#endif
+
+#if USE_CAN
+        /* Stage 9: Solid on while CAN data is actively flowing */
+        if (g_can_frame_count != prev_can_count)
+        {
+            prev_can_count = g_can_frame_count;
+            gpio_set_level(LED_GPIO, 1);
+            vTaskDelay(pdMS_TO_TICKS(200));
+            continue;
+        }
+#endif
+
+#if USE_WIFI
+        /* Stage 9: Fast blink while Wi-Fi is not yet connected */
+        if ((xEventGroupGetBits(wifi_event_group()) & WIFI_CONNECTED_BIT) == 0)
+        {
+            gpio_set_level(LED_GPIO, 1); vTaskDelay(pdMS_TO_TICKS(100));
+            gpio_set_level(LED_GPIO, 0); vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+#endif
+
+        /* Stage 9: Slow blink — system nominal */
+        gpio_set_level(LED_GPIO, 1); vTaskDelay(pdMS_TO_TICKS(100));
+        gpio_set_level(LED_GPIO, 0); vTaskDelay(pdMS_TO_TICKS(900));
+    }
+}
+
+/* ================================================================
+ * Stage 9: Heartbeat task — publishes periodic system-health JSON
+ * ================================================================
+ * Published every HEARTBEAT_INTERVAL_MS with uptime, free heap,
+ * SD card status, and CAN frames-per-second.
+ * Uses MQTT (topic + "/heartbeat") or UDP depending on USE_MQTT.
+ */
+#if USE_WIFI
+void heartbeat_task(void *pvParameters)
+{
+    const char *TAG = "heartbeat";
+    ESP_LOGI(TAG, "Heartbeat task running on core %d", xPortGetCoreID());
+
+    EventGroupHandle_t eg = wifi_event_group();
+
+    /* Stage 9: Wait for Wi-Fi before attempting any network I/O */
+    xEventGroupWaitBits(eg, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
+
+#if USE_CAN
+    uint32_t prev_can_count = 0;
+#endif
+
+    while (1)
+    {
+        vTaskDelay(pdMS_TO_TICKS(HEARTBEAT_INTERVAL_MS));
+
+        /* Stage 9: Skip if Wi-Fi is currently down */
+        if ((xEventGroupGetBits(eg) & WIFI_CONNECTED_BIT) == 0)
+            continue;
+
+        /* Stage 9: Compute CAN frames per second */
+        uint32_t can_fps = 0;
+#if USE_CAN
+        uint32_t current_count = g_can_frame_count;
+        can_fps = (current_count - prev_can_count) * 1000 / HEARTBEAT_INTERVAL_MS;
+        prev_can_count = current_count;
+#endif
+
+        /* Stage 9: Build compact JSON heartbeat payload (~80 bytes) */
+        uint32_t uptime_s = (uint32_t)(esp_timer_get_time() / 1000000);
+        size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_DEFAULT);
+        int sd_ok_flag = 1;
+#if USE_SDIO
+        sd_ok_flag = g_sd_ok ? 1 : 0;
+#endif
+
+        char json[96];
+        snprintf(json, sizeof(json),
+                 "{\"uptime_s\":%lu,\"free_heap\":%lu,\"sd_ok\":%d,\"can_fps\":%lu}",
+                 (unsigned long)uptime_s,
+                 (unsigned long)free_heap,
+                 sd_ok_flag,
+                 (unsigned long)can_fps);
+
+        /* Stage 9: Publish via MQTT or send as UDP packet */
+#if USE_MQTT
+        /* Note: the MQTT client handle lives inside mqtt_sender_task.
+         * We re-use the public topic with a "/heartbeat" suffix.
+         * A minimal approach: publish via a local MQTT client init. */
+        {
+            extern esp_mqtt_client_handle_t mqtt_heartbeat_client;
+            if (mqtt_heartbeat_client != NULL)
+            {
+                esp_mqtt_client_publish(mqtt_heartbeat_client, MQTT_PUB_TOPIC "/heartbeat",
+                                        json, 0, 0, 0);
+            }
+        }
+#else
+        /* Stage 9: Re-use the UDP socket for heartbeat packets */
+        {
+            extern void udp_send_heartbeat(const char *data, int len);
+            udp_send_heartbeat(json, (int)strlen(json));
+        }
+#endif
+
+        ESP_LOGD(TAG, "Heartbeat: %s", json);
+    }
+}
+#endif /* USE_WIFI */
