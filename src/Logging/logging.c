@@ -9,7 +9,7 @@
  */
 
 #include "logging.h"
-#include "..\RTC_Time_Sync\rtc_time_sync.h"
+#include "../RTC_Time_Sync/rtc_time_sync.h"
 
 /*
  * ================================================================
@@ -114,7 +114,9 @@ esp_err_t SDIO_SD_Init(void)
     // ret = esp_vfs_fat_sdmmc_mount(mount_point, &host, &slot_config, &mount_config, &card);
 
     // Card has been initialized, print its properties
-    sdmmc_card_print_info(stdout, card);
+    if (ret == ESP_OK) {
+        sdmmc_card_print_info(stdout, card);
+    }
     return ret;
 }
 
@@ -287,7 +289,7 @@ esp_err_t SDIO_SD_Create_Write_File(SDIO_FileConfig *file, SDIO_TxBuffer *pTxBuf
  */
 esp_err_t SDIO_SD_Add_Data(SDIO_FileConfig *file, SDIO_TxBuffer *pTxBuffer)
 {
-    ret = ESP_OK;
+    esp_err_t ret = ESP_OK;
     static const char *TAG = "SDIO_SD_Add_Data";
 
     struct stat st;
@@ -295,7 +297,7 @@ esp_err_t SDIO_SD_Add_Data(SDIO_FileConfig *file, SDIO_TxBuffer *pTxBuffer)
     {
         //@debug
         // ESP_LOGI(TAG, "Found File Successfully!");
-        if (open_file != file->name && f != NULL)
+        if (f != NULL && (open_file == NULL || strcmp(open_file, file->name) != 0))
         {
             //@debug
             //ESP_LOGI(TAG, "Closing the File %s now", open_file);
@@ -402,6 +404,7 @@ esp_err_t SDIO_SD_Add_Data(SDIO_FileConfig *file, SDIO_TxBuffer *pTxBuffer)
                 fclose(f); // Optional but safer after each batch
                 open_file = NULL;
                 f = NULL;
+                writes_Num = 0;
             }
             else
             {
@@ -480,6 +483,7 @@ esp_err_t SDIO_SD_Read_Data(SDIO_FileConfig *file)
 esp_err_t SDIO_SD_Close_file(void)
 {
     ret = ESP_OK;
+    if (f == NULL) return ESP_OK;
     // Close the file if it is open
     if (fclose(f) == 0)
     {
@@ -639,7 +643,11 @@ esp_err_t SDIO_SD_log_can_message_to_csv(twai_message_t *msg)
     }
 
     // Optional: Write CSV header once
-    fprintf(f, "Timestamp,ID,EXTD,RTR,DLC,DATA[0-7]\n");
+    static bool header_written = false;
+    if (!header_written) {
+        fprintf(f, "Timestamp,ID,EXTD,RTR,DLC,DATA[0-7]\n");
+        header_written = true;
+    }
     char time_buffer[32];
 
     if (Time_Sync_get_rtc_time_str(time_buffer, sizeof(time_buffer)) != true)
