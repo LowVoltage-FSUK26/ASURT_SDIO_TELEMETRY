@@ -66,7 +66,7 @@
 
 /* Stage 8: MAX_WRITES and MAX_DAYS_MODIFIED moved to telemetry_config.h
  * as LOG_FLUSH_EVERY_N_WRITES and MAX_DAYS_MODIFIED respectively. */
-#include "../telemetry_config.h"
+#include "telemetry_config.h"
 
 //----------------------------
 // CAN Macros

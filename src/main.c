@@ -160,7 +160,7 @@ void app_main(void)
         ESP_LOGI(TAG, "Filesystem mounted");
 
         /* Stage 5: Session file naming — find a fresh LOG_N.CSV slot */
-        char name_buffer[12] = "LOG_0.CSV";
+        static char name_buffer[12] = "LOG_0.CSV";
         LOG_CSV.name = name_buffer;
         LOG_CSV.type = CSV;
 
@@ -436,7 +436,10 @@ void SDIO_Log_Task_init(void *pvParameters)
     while (1)
     {
         /* Stage 5: Block until CAN task notifies us (queue was full or periodic) */
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        /* Wake every 50 ms regardless of whether the queue overflowed.
+         * This ensures logging happens at low CAN traffic (bench tests,
+         * run startup) and not only when CAN_SDIO_queue_Handler is full. */
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(50));
 
         // 1. Clear buffer and flags
         EMPTY_SDIO_BUFFER(SDIO_buffer);

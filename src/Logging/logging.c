@@ -10,7 +10,6 @@
 
 #include "logging.h"
 #include "../RTC_Time_Sync/rtc_time_sync.h"
-#include "esp_timer.h" /* Stage 4: millisecond-resolution timestamps via esp_timer_get_time() */
 
 /*
  * ================================================================
@@ -124,7 +123,11 @@ esp_err_t SDIO_SD_DeInit(void)
 {
     esp_err_t ret = ESP_OK; /* Stage 4: local return code */
     if (open_file != NULL && f != NULL)
+    {
         fclose(f);
+        f = NULL;          /* reset so Add_Data doesn't close a stale handle */
+        open_file = NULL;  /* reset to match */
+    }
     ret = esp_vfs_fat_sdcard_unmount(mount_point, card);
     return ret;
 }
@@ -151,18 +154,11 @@ esp_err_t SDIO_SD_Create_Write_File(SDIO_FileConfig *file, SDIO_TxBuffer *pTxBuf
     }
     snprintf(file->path, sizeof(file->path), "%s/%s", MOUNT_POINT, file->name);
 
-    /* Stage 4: millisecond-resolution timestamp using esp_timer for the ms fraction */
     char time_buffer[36];
+    if (Time_Sync_get_rtc_time_str(time_buffer, sizeof(time_buffer)) != true)
     {
-        char base_time[24];
-        if (Time_Sync_get_rtc_time_str(base_time, sizeof(base_time)) != true)
-        {
-            ESP_LOGE("RTC", "Failed to get time.");
-            strcpy(base_time, "XXXX-XX-XX XX:XX:XX");
-        }
-        /* Append milliseconds from the high-resolution timer */
-        uint32_t ms = (uint32_t)((esp_timer_get_time() / 1000ULL) % 1000ULL);
-        snprintf(time_buffer, sizeof(time_buffer), "%s.%03lu", base_time, (unsigned long)ms);
+        ESP_LOGE("RTC", "Failed to get time.");
+        strcpy(time_buffer, "XXXX-XX-XX XX:XX:XX.000");
     }
 
     // Check if the files exists and Modification Time less than 2 days
@@ -312,17 +308,11 @@ esp_err_t SDIO_SD_Add_Data(SDIO_FileConfig *file, SDIO_TxBuffer *pTxBuffer)
         {
             open_file = file->name; // Assign the name of the opened file
       
-            /* Stage 4: millisecond-resolution timestamp for append path */
             char time_buffer[36];
+            if (Time_Sync_get_rtc_time_str(time_buffer, sizeof(time_buffer)) != true)
             {
-                char base_time[24];
-                if (Time_Sync_get_rtc_time_str(base_time, sizeof(base_time)) != true)
-                {
-                    ESP_LOGE("RTC", "Failed to get time.");
-                    strcpy(base_time, "XXXX-XX-XX XX:XX:XX");
-                }
-                uint32_t ms = (uint32_t)((esp_timer_get_time() / 1000ULL) % 1000ULL);
-                snprintf(time_buffer, sizeof(time_buffer), "%s.%03lu", base_time, (unsigned long)ms);
+                ESP_LOGE("RTC", "Failed to get time.");
+                strcpy(time_buffer, "XXXX-XX-XX XX:XX:XX.000");
             }
 
             // Check if file type is .TXT or .CSV
@@ -487,102 +477,6 @@ esp_err_t SDIO_SD_Close_file(void)
         ret = ESP_FAIL; // Failed to close file
     }
     return ret;
-}
-
-/**================================================================
- * @Fn				- SDIO_SD_LOG_CAN_Message
- * @breif			- Creates New .txt File Called SDIO_CAN_txt and last 10 received msgs
- * @param [in]		- rx_msg: pointer to Buffer storing Received Msg
- * @retval			- Value indicates the States of SD Card (Anything other that ESP_OK is an Error)
- * Note				-
- */
-esp_err_t SDIO_SD_LOG_CAN_Message(twai_message_t *rx_msg)
-{
-
-    esp_err_t ret = ESP_OK;
-    // Debug variables
-    uint8_t Logged_msgs = 0;
-    uint32_t alerts = 0;
-    twai_status_info_t s;
-
-    SDIO_FileConfig SDIO_CAN_txt;
-    SDIO_TxBuffer buffer;
-    static const char *TAG = "SDIO_CAN_DEBUG";
-    char time_buffer[32];
-
-    SDIO_CAN_txt.name = "SDIO_CAN.TXT";
-    SDIO_CAN_txt.type = TXT;
-    buffer.string = "CAN Message Log\r\n";
-    if (SDIO_SD_Create_Write_File(&SDIO_CAN_txt, &buffer) == ESP_OK)
-    {
-        ESP_LOGI(TAG, "SDIO_CAN.txt Created Successfully!");
-    }
-
-    char sd_write_buffer[180]; // Adjust size as needed
-
-    // Process rx_msg->identifier, rx_msg->data, etc.
-
-    /*  printf("ID = 0x%03lX\n",rx_msg->identifier);
-    printf("Extended? %s\n", rx_msg->extd ? "Yes" : "No");
-    printf("RTR? %s\n", rx_msg->rtr ? "Yes" : "No");
-    printf("DLC = %d\n", rx_msg->data_length_code);
-    for (int i = 0; i < rx_msg->data_length_code; i++) {
-        printf("byte[%d] = 0x%02X\n", i, rx_msg->data[i]);
-    } */
-
-    for (uint8_t i = 0; i < 10; i++)
-    {
-        if (twai_receive(rx_msg, pdMS_TO_TICKS(1000)) == ESP_OK)
-        {
-            if (Time_Sync_get_rtc_time_str(time_buffer, sizeof(time_buffer)) != true)
-            {
-                ESP_LOGE("RTC", "Failed to get time.");
-                strcpy(time_buffer, "XXXXXXXX");
-            }
-
-            // Format the message into the string buffer
-            snprintf(sd_write_buffer, sizeof(sd_write_buffer),
-                     "TimeStamp: %s ID: 0x%03lX Data[0]: 0x%02X Data[1]: 0x%02X Data[2]: 0x%02X Data[3]: 0x%02X "
-                     "Data[4]: 0x%02X Data[5]: 0x%02X Data[6]: 0x%02X Data[7]: 0x%02X\r",
-                     time_buffer, rx_msg->identifier,
-                     rx_msg->data[0], rx_msg->data[1], rx_msg->data[2], rx_msg->data[3],
-                     rx_msg->data[4], rx_msg->data[5], rx_msg->data[6], rx_msg->data[7]);
-
-            // Now write this to your SDIO buffer
-            buffer.string = sd_write_buffer;
-
-            if (SDIO_SD_Add_Data(&SDIO_CAN_txt, &buffer) == ESP_OK)
-            {
-                Logged_msgs++;
-            }
-        }
-        else
-        {
-            ESP_LOGI("CAN", "No message received within the timeout period");
-            ret = twai_read_alerts(&alerts, 0);
-            if (ret == ESP_OK)
-            {
-                ESP_LOGI("CAN", "TWAI alert: %08ld", alerts);
-            }
-            twai_get_status_info(&s);
-            ESP_LOGI("CAN", "RX errors: %ld, bus errors: %ld, RX queue full: %ld",
-                     s.rx_error_counter, s.bus_error_count, s.rx_missed_count);
-
-            return ESP_FAIL; // No message received
-        }
-    }
-
-    if (SDIO_SD_Close_file() == ESP_OK)
-    {
-        ESP_LOGI(TAG, "File Closed Successfully! ... Messages Logged: %u", Logged_msgs);
-    }
-
-#if CONFIG_SDIO_DEBUG_READ
-    SDIO_SD_Read_Data(&SDIO_CAN_txt);
-    vTaskDelay(pdMS_TO_TICKS(1000));
-#endif
-
-    return ESP_OK;
 }
 
 /**================================================================
