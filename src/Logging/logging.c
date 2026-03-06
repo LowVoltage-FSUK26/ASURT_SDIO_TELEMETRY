@@ -499,6 +499,7 @@ esp_err_t SDIO_SD_Close_file(void)
 esp_err_t SDIO_SD_LOG_CAN_Message(twai_message_t *rx_msg)
 {
 
+    esp_err_t ret = ESP_OK;
     // Debug variables
     uint8_t Logged_msgs = 0;
     uint32_t alerts = 0;
@@ -576,8 +577,10 @@ esp_err_t SDIO_SD_LOG_CAN_Message(twai_message_t *rx_msg)
         ESP_LOGI(TAG, "File Closed Successfully! ... Messages Logged: %u", Logged_msgs);
     }
 
+#if CONFIG_SDIO_DEBUG_READ
     SDIO_SD_Read_Data(&SDIO_CAN_txt);
     vTaskDelay(pdMS_TO_TICKS(1000));
+#endif
 
     return ESP_OK;
 }
