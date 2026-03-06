@@ -1,14 +1,18 @@
 #include "mqtt_sender.h"
 #include "wifi_manager/wifi_manager.h"
 #include "telemetry_config.h"
+#include "telemetry_packet.h"    /* Stage 6: stable wire-format */
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "esp_log.h"
+#include "esp_timer.h"            /* Stage 6: for esp_timer_get_time() */
 #include "mqtt_client.h"
 #include "driver/twai.h"
+#include <string.h>               /* Stage 6: for memcpy() */
 
 static const char *TAG = "mqtt_sender";
 static bool mqtt_connected;
+static uint32_t mqtt_seq = 0;  /* Stage 6: rolling sequence number for drop detection */
 
 #if USE_MQTT
 const char mqtt_root_ca_pem[] =
@@ -81,7 +85,6 @@ void mqtt_sender_task(void *pvParameters)
     esp_mqtt_client_start(client);
 
     twai_message_t current, newer;
-    int len = sizeof(twai_message_t);
     bool warned = false;
     while (1) {
         if (xQueueReceive(telemetry_queue, &current, portMAX_DELAY) != pdTRUE) {
@@ -97,13 +100,33 @@ void mqtt_sender_task(void *pvParameters)
                 warned = true;
             }
             xEventGroupWaitBits(eg, WIFI_CONNECTED_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
+            /* Stage 6: timeout-based fallback warning instead of infinite silent spin.
+             * Logs every 10 s so the operator knows the broker is unreachable. */
+            int wait_ticks = 0;
             while (!mqtt_connected) {
                 vTaskDelay(pdMS_TO_TICKS(100));
+                if (++wait_ticks >= 100) {  // 10 seconds
+                    ESP_LOGE(TAG, "MQTT broker unreachable after 10s — check network/broker config");
+                    wait_ticks = 0;
+                }
             }
             warned = false;
             continue;
         }
-        esp_mqtt_client_publish(client, MQTT_PUB_TOPIC, (const char *)&current, len, 0, 0);
+
+        /* Stage 6: convert twai_message_t → telemetry_packet_t (stable 24-byte wire format) */
+        telemetry_packet_t pkt = {
+            .seq          = mqtt_seq++,
+            .timestamp_ms = (uint32_t)(esp_timer_get_time() / 1000),
+            .can_id       = (uint16_t)current.identifier,
+            .dlc          = current.data_length_code,
+            .flags        = (current.extd ? 0x01 : 0x00) | (current.rtr ? 0x02 : 0x00),
+        };
+        memcpy(pkt.data, current.data, sizeof(pkt.data));
+
+        // QoS 0: fire-and-forget. Deliberate choice for racing telemetry —
+        // low latency is more valuable than guaranteed delivery.
+        esp_mqtt_client_publish(client, MQTT_PUB_TOPIC, (const char *)&pkt, sizeof(pkt), 0, 0);
         // vTaskDelay(pdMS_TO_TICKS(10));
     }
 #else

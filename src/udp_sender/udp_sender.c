@@ -1,5 +1,6 @@
 #include "udp_sender.h"
 #include "wifi_manager/wifi_manager.h"
+#include "telemetry_packet.h"   /* Stage 6: stable wire-format */
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/semphr.h"
@@ -7,6 +8,7 @@
 #include "lwip/inet.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "esp_timer.h"            /* Stage 6: for esp_timer_get_time() */
 #include "telemetry_config.h"
 #include "driver/twai.h"
 #include <string.h>
@@ -23,6 +25,7 @@ static SemaphoreHandle_t udp_mutex = NULL;
 #define UDP_BASE_DELAY_MS 10
 
 static uint32_t heap_log_counter = 0;
+static uint32_t udp_seq = 0;  /* Stage 6: rolling sequence number for drop detection */
 
 static bool init_udp_socket(void) {
     if (!udp_mutex) {
@@ -98,7 +101,6 @@ void udp_sender_task(void *pvParameters)
     }
 
     twai_message_t current, newer;
-    int len = sizeof(twai_message_t);
 
     while (1) {
         if (xQueueReceive(telemetry_queue, &current, portMAX_DELAY) != pdTRUE) {
@@ -117,18 +119,30 @@ void udp_sender_task(void *pvParameters)
             init_udp_socket();
         }
 
+        /* Stage 6 fix: drain queue FIRST so we always send the newest frame,
+         * then run the retry loop with a properly advancing attempt counter.
+         * Before this fix, `attempt = 0` inside the for-loop could spin forever
+         * when the queue was fed faster than sendto() could complete. */
+        while (xQueueReceive(telemetry_queue, &newer, 0) == pdTRUE) {
+            current = newer;
+        }
+
+        /* Stage 6: convert twai_message_t → telemetry_packet_t (stable 24-byte wire format) */
+        telemetry_packet_t pkt = {
+            .seq          = udp_seq++,
+            .timestamp_ms = (uint32_t)(esp_timer_get_time() / 1000),
+            .can_id       = (uint16_t)current.identifier,
+            .dlc          = current.data_length_code,
+            .flags        = (current.extd ? 0x01 : 0x00) | (current.rtr ? 0x02 : 0x00),
+        };
+        memcpy(pkt.data, current.data, sizeof(pkt.data));
+
         bool sent = false;
         int last_err = 0;
         for (int attempt = 1; attempt <= UDP_MAX_RETRIES; ++attempt) {
-            if (xQueueReceive(telemetry_queue, &newer, 0) == pdTRUE) {
-                current = newer;
-                attempt = 0;
-                continue;
-            }
-
             xSemaphoreTake(udp_mutex, portMAX_DELAY);
             int ret = sendto(udp_sock,
-                             &current, len, 0,
+                             &pkt, sizeof(pkt), 0,  /* Stage 6: send telemetry_packet_t */
                              (struct sockaddr *)&dest_addr,
                              sizeof(dest_addr));
             last_err = errno;
