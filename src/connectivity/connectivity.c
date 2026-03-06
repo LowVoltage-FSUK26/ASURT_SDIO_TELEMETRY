@@ -23,6 +23,14 @@ static bool connectivity_test(void)
         return false;
     }
 
+    /* Stage 7: apply send/receive timeout so the probe doesn't block forever */
+    struct timeval tv = {
+        .tv_sec  = CONNECTIVITY_TCP_TIMEOUT_S,
+        .tv_usec = 0
+    };
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
     int err = connect(sock, (struct sockaddr *)&dest, sizeof(dest));
     close(sock);
     return (err == 0);

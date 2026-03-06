@@ -26,6 +26,6 @@
 //===============================================
 void Time_Sync_init_sntp(void);
 void Time_Sync_obtain_time(void);
-uint8_t Time_Sync_get_rtc_time_str(char *buffer, uint8_t max_len);  
-void wifi_connect(void);
+uint8_t Time_Sync_get_rtc_time_str(char *buffer, uint8_t max_len);
+/* Stage 7: removed dead wifi_connect() declaration — not implemented anywhere */
 #endif // RTC_TIME_SYNC_H

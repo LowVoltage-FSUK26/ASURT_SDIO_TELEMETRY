@@ -9,7 +9,9 @@
  *                  formatted time strings for logging or display.
  */
 
-#include "rtc_time_sync.h"  
+#include "rtc_time_sync.h"
+#include "esp_timer.h"       // Stage 7: needed for esp_timer_get_time() (ms resolution)
+#include "telemetry_config.h" // Stage 7: TIMEZONE_STR
 
 static const char *TAG = "rtc_time";
 
@@ -34,7 +36,7 @@ void Time_Sync_obtain_time(void)
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 
-    setenv("TZ", "GMT-3", 1);  // or your timezone string
+    setenv("TZ", TIMEZONE_STR, 1);  // Stage 7: use configurable timezone from telemetry_config.h
     tzset();
 }
 
@@ -43,7 +45,14 @@ uint8_t Time_Sync_get_rtc_time_str(char *buffer, uint8_t max_len)
     time_t now = time(NULL);
     struct tm timeinfo;
     if (!localtime_r(&now, &timeinfo)) return false;
-    strftime(buffer, max_len, "%Y-%m-%d %H:%M:%S", &timeinfo);
+
+    /* Stage 7: append millisecond resolution (.mmm) via esp_timer */
+    int64_t time_us = esp_timer_get_time();
+    int ms = (time_us / 1000) % 1000;
+
+    char base[24];
+    strftime(base, sizeof(base), "%Y-%m-%d %H:%M:%S", &timeinfo);
+    snprintf(buffer, max_len, "%s.%03d", base, ms);
     return true;
 } 
 

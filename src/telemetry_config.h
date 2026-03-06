@@ -29,5 +29,10 @@ extern const char mqtt_root_ca_pem[];
 #define CONNECTIVITY_TEST_PORT 53
 #define CONNECTIVITY_CHECK_INTERVAL_MS 1000
 #define CONNECTIVITY_FAIL_THRESHOLD 3
+#define CONNECTIVITY_TCP_TIMEOUT_S 3   // Stage 7: TCP send/recv timeout for connectivity probe
+
+// Stage 7: configurable timezone for RTC time sync.
+// Egypt (EET = UTC+3). Change to "GMT+1" / "BST" for UK events.
+#define TIMEZONE_STR "GMT-3"
 
 #endif // TELEMETRY_CONFIG_H
