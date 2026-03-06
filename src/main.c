@@ -117,55 +117,57 @@ void app_main(void)
     vTaskDelay(pdMS_TO_TICKS(3000));
 
     //==========================================SDIO Implementation (DONE)===========================================
-    /* Stage 3: Entire SDIO init block guarded by USE_SDIO. */
+    /* Stage 3: Entire SDIO init block guarded by USE_SDIO.
+     * Stage 5: Re-enabled SD card init and session file naming logic. */
 #if USE_SDIO
-    // static const char *TAG = "SDIO";
-    // esp_err_t ret;
-    // ret = SDIO_SD_Init();
+    static const char *TAG = "SDIO";
+    esp_err_t ret;
+    ret = SDIO_SD_Init();
 
-    // if (ret != ESP_OK)
-    // {
-    //     if (ret == ESP_FAIL)
-    //     {
-    //         ESP_LOGE(TAG, "Failed to mount filesystem. "
-    //                       "If you want the card to be formatted, set the EXAMPLE_FORMAT_IF_MOUNT_FAILED menuconfig option.");
-    //     }
-    //     else
-    //     {
-    //         ESP_LOGE(TAG, "Failed to initialize the card (%s). "
-    //                       "Make sure SD card lines have pull-up resistors in place.",
-    //                  esp_err_to_name(ret));
-    //     }
-    // }
-    // else
-    // {
-    //     ESP_LOGI(TAG, "Filesystem mounted");
+    if (ret != ESP_OK)
+    {
+        if (ret == ESP_FAIL)
+        {
+            ESP_LOGE(TAG, "Failed to mount filesystem. "
+                          "If you want the card to be formatted, set the EXAMPLE_FORMAT_IF_MOUNT_FAILED menuconfig option.");
+        }
+        else
+        {
+            ESP_LOGE(TAG, "Failed to initialize the card (%s). "
+                          "Make sure SD card lines have pull-up resistors in place.",
+                     esp_err_to_name(ret));
+        }
+    }
+    else
+    {
+        ESP_LOGI(TAG, "Filesystem mounted");
 
-    //     char name_buffer[12] = "LOG_0.CSV";
-    //     LOG_CSV.name = name_buffer;
-    //     LOG_CSV.type = CSV;
+        /* Stage 5: Session file naming — find a fresh LOG_N.CSV slot */
+        char name_buffer[12] = "LOG_0.CSV";
+        LOG_CSV.name = name_buffer;
+        LOG_CSV.type = CSV;
 
-    //     snprintf(LOG_CSV.path, sizeof(LOG_CSV.path), "%s/%s", MOUNT_POINT, LOG_CSV.name);
+        snprintf(LOG_CSV.path, sizeof(LOG_CSV.path), "%s/%s", MOUNT_POINT, LOG_CSV.name);
 
-    //     // // Check if the files exists and Modification Time more than 2 days
-    //     // //if it exists and last modified was more than 2 days
-    //     // //      Increment the name of the file and check again
-    //     // // if it exists and last modified in less than 2 days           |
-    //     // //      Don't change name and add to the already existing file  |   This logic is implemented
-    //     // // if it doesn't exist                                          |   SDIO_SD_Create_Write_File()
-    //     // //      Create file                                             |
+        // Check if the file exists and Modification Time more than 2 days
+        // if it exists and last modified was more than 2 days
+        //      Increment the name of the file and check again
+        // if it exists and last modified in less than 2 days           |
+        //      Don't change name and add to the already existing file  |   This logic is implemented
+        // if it doesn't exist                                          |   SDIO_SD_Create_Write_File()
+        //      Create file                                             |
 
-    //     struct stat st;
-    //     uint8_t Session_Num = 0;
-    //     while ((stat(LOG_CSV.path, &st) == 0) && (compare_file_time_days(LOG_CSV.path) > MAX_DAYS_MODIFIED))
-    //     {
-    //         // it exists and last modified was more than 2 days
-    //         Session_Num++;
-    //         // Update Name and path
-    //         snprintf(name_buffer, sizeof(name_buffer), "LOG_%u.CSV", Session_Num);
-    //         snprintf(LOG_CSV.path, sizeof(LOG_CSV.path), "%s/%s", MOUNT_POINT, LOG_CSV.name);
-    //     }
-    // }
+        struct stat st;
+        uint8_t Session_Num = 0;
+        while ((stat(LOG_CSV.path, &st) == 0) && (compare_file_time_days(LOG_CSV.path) > MAX_DAYS_MODIFIED))
+        {
+            // it exists and last modified was more than 2 days
+            Session_Num++;
+            // Update Name and path
+            snprintf(name_buffer, sizeof(name_buffer), "LOG_%u.CSV", Session_Num);
+            snprintf(LOG_CSV.path, sizeof(LOG_CSV.path), "%s/%s", MOUNT_POINT, LOG_CSV.name);
+        }
+    }
 
     /*
     //@debug SDIO
@@ -268,11 +270,12 @@ void app_main(void)
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 
-    // if (CAN_SDIO_queue_Handler == NULL) // If there is no queue created
-    // {
-    //     ESP_LOGE("RTOS", "Unable to Create Structure Queue");
-    //     vTaskDelay(pdMS_TO_TICKS(1000));
-    // }
+    /* Stage 5: Re-enabled SDIO queue NULL check */
+    if (CAN_SDIO_queue_Handler == NULL) // If there is no queue created
+    {
+        ESP_LOGE("RTOS", "Unable to Create SDIO Queue");
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
 #endif /* USE_CAN */
 
     //=============Define Tasks=================//
@@ -282,11 +285,9 @@ void app_main(void)
     BaseType_t result_CAN = xTaskCreatePinnedToCore((TaskFunction_t)CAN_Receive_Task_init, "CAN_Receive_Task", 4096, NULL, (UBaseType_t)4, &CAN_Receive_TaskHandler, 1); // <-- Priority 4
 #endif
 
-    /* Stage 3: SDIO log task needs both SDIO and CAN (data source).
-     * Still commented out internally — that's fine, the guard is in place
-     * for when it gets re-enabled. */
+    /* Stage 5: Re-enabled SDIO log task — needs both SDIO and CAN (data source). */
 #if USE_SDIO && USE_CAN
-    // BaseType_t result_SDIO = xTaskCreatePinnedToCore((TaskFunction_t)SDIO_Log_Task_init, "SDIO_Log_Task", 4096, NULL, (UBaseType_t)3, &SDIO_Log_TaskHandler, 1);         // <-- Core 1, Priority 3
+    BaseType_t result_SDIO = xTaskCreatePinnedToCore((TaskFunction_t)SDIO_Log_Task_init, "SDIO_Log_Task", 4096, NULL, (UBaseType_t)3, &SDIO_Log_TaskHandler, 1); // <-- Core 1, Priority 3
 #endif
 
     // --- Network Tasks on Core 0 ---
@@ -303,10 +304,13 @@ void app_main(void)
 
     printf("========================================\n\n");
 
-    // if (result_SDIO == pdPASS)
-    //     ESP_LOGI("SDIO_Log_Task", "Task created successfully");
-    // else
-    //     ESP_LOGE("SDIO_Log_Task", "Task creation failed");
+    /* Stage 5: Re-enabled SDIO task creation result logging */
+#if USE_SDIO && USE_CAN
+    if (result_SDIO == pdPASS)
+        ESP_LOGI("SDIO_Log_Task", "Task created successfully");
+    else
+        ESP_LOGE("SDIO_Log_Task", "Task creation failed");
+#endif
 
     /* Stage 3: Task creation result logging matches the guards above. */
 #if USE_CAN
@@ -366,16 +370,25 @@ void CAN_Receive_Task_init(void *pvParameters) // DONE
             // Reset counter on successful receive
             timeout_counter = 0;
 
-            // Format the message into the string buffer
-            xQueueSend(telemetry_queue, &rx_msg, (TickType_t)10);
+            /* Stage 5: Dual-queue CAN fan-out — non-blocking sends (tick=0)
+             * so CAN reception is never stalled by a full queue. */
 
-            // if (xQueueSend(CAN_SDIO_queue_Handler, &rx_msg, (TickType_t)10) != pdPASS)
-            // {
-            //     if (SDIO_Log_TaskHandler != NULL)
-            //     {
-            //         xTaskNotifyGive(SDIO_Log_TaskHandler); // Notify SDIO task
-            //     }
-            // }
+            /* Send to telemetry (Wi-Fi) queue */
+#if USE_WIFI
+            xQueueSend(telemetry_queue, &rx_msg, 0);
+#endif
+
+            /* Send to SDIO logging queue + notify the SD task */
+#if USE_SDIO
+            if (xQueueSend(CAN_SDIO_queue_Handler, &rx_msg, 0) != pdPASS)
+            {
+                /* Queue full — notify SD task to drain it */
+                if (SDIO_Log_TaskHandler != NULL)
+                {
+                    xTaskNotifyGive(SDIO_Log_TaskHandler);
+                }
+            }
+#endif
         }
         else
         {
@@ -401,172 +414,167 @@ void CAN_Receive_Task_init(void *pvParameters) // DONE
 }
 #endif /* USE_CAN */
 
-// void SDIO_Log_Task_init(void *pvParameters) // WORKS! Needs testing
-// {
+/* Stage 5: Re-enabled SDIO_Log_Task_init — receives CAN frames from
+ * CAN_SDIO_queue_Handler, aggregates one sample of each CAN ID within
+ * a 50 ms window, then appends the row to the CSV on the SD card.
+ * Switch-case IDs verified against COMM_CAN_ID_t enum in logging.h. */
+#if USE_SDIO && USE_CAN
+void SDIO_Log_Task_init(void *pvParameters)
+{
+    const char *TAG = "SDIO_Log_Task";
+    ESP_LOGI(TAG, "SDIO_LOG IS WORKING");
+    ESP_LOGI(TAG, "Running on core %d", xPortGetCoreID());
+    uint8_t prev_reset = 0;
 
-//     const char *TAG = "SDIO_Log_Task";
-//     ESP_LOGI(TAG, "SDO_LOG IS WORKING");
-//     ESP_LOGI("SDIO_Log_Task", "Running on core %d", xPortGetCoreID());
-//     uint8_t prev_reset = 0;
+    // Assign Zero to all elements of SDIO_buffer and Log initial Line
+    EMPTY_SDIO_BUFFER(SDIO_buffer);
 
-//     // Assign Zero to all elements of SDIO_buffer and Log initial Line
-//     EMPTY_SDIO_BUFFER(SDIO_buffer);
+    if (SDIO_SD_Create_Write_File(&LOG_CSV, &SDIO_buffer) == ESP_OK)
+        ESP_LOGI(TAG, "%s Written Successfully!", LOG_CSV.name);
 
-//     if (SDIO_SD_Create_Write_File(&LOG_CSV, &SDIO_buffer) == ESP_OK)
-//         ESP_LOGI(TAG, "%s Written Successfully!", LOG_CSV.name);
+    twai_message_t buffer;
+    const uint8_t NUM_IDS = COMM_CAN_ID_COUNT; /* Stage 5: 6 IDs — matches COMM_CAN_ID_t */
+    uint8_t id_received[NUM_IDS];
+    TickType_t period = pdMS_TO_TICKS(50);
 
-//     twai_message_t buffer;
-//     const uint8_t NUM_IDS = COMM_CAN_ID_COUNT;
-//     uint8_t id_received[NUM_IDS];
-//     TickType_t period = pdMS_TO_TICKS(50);
+    while (1)
+    {
+        /* Stage 5: Block until CAN task notifies us (queue was full or periodic) */
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
-//     while (1)
-//     {
-//         // Wait for notification
-//         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        // 1. Clear buffer and flags
+        EMPTY_SDIO_BUFFER(SDIO_buffer);
+        memset(&buffer, 0, sizeof(twai_message_t));
+        memset(id_received, 0, sizeof(id_received));
 
-//         // 1. Clear buffer and flags
-//         EMPTY_SDIO_BUFFER(SDIO_buffer);
-//         memset(&buffer, 0, sizeof(twai_message_t));
-//         memset(id_received, 0, sizeof(id_received));
+        TickType_t start = xTaskGetTickCount();
+        TickType_t now = start;
+        uint8_t received_count = 0;
 
-//         TickType_t start = xTaskGetTickCount();
-//         TickType_t now = start;
-//         uint8_t received_count = 0;
+        /* Stage 5: Drain CAN_SDIO_queue_Handler within the 50 ms window,
+         * collecting one sample per CAN ID. */
+        while ((now - start) < period && received_count < NUM_IDS)
+        {
+            TickType_t remaining = period - (now - start);
+            if (xQueueReceive(CAN_SDIO_queue_Handler, &buffer, remaining))
+            {
+                /* Stage 5: Demux by CAN ID — verified against COMM_CAN_ID_t enum:
+                 * 0x071 IMU_ANGLE, 0x072 IMU_ACCEL, 0x073 ADC,
+                 * 0x074 PROX_ENCODER, 0x075 GPS_LATLONG, 0x076 TEMP */
+                switch (buffer.identifier)
+                {
+                case COMM_CAN_ID_IMU_ANGLE:
+                    if (id_received[COMM_CAN_ID_IMU_ANGLE - COMM_CAN_ID_FISRT] == 0)
+                    {
+                        memcpy(&SDIO_buffer.imu_ang, buffer.data, sizeof(COMM_message_IMU_t));
+                        id_received[COMM_CAN_ID_IMU_ANGLE - COMM_CAN_ID_FISRT] = 1;
+                        received_count++;
+                    }
+                    break;
 
-//         while ((now - start) < period && received_count < NUM_IDS)
-//         {
-//             TickType_t remaining = period - (now - start);
-//             if (xQueueReceive(CAN_SDIO_queue_Handler, &buffer, remaining))
-//             {
-//                 //@debug SDIO
-//                 // To print the Message Received
-//                 /*  printf("ID = 0x%03lX ", buffer.identifier);
-//                 printf("Extended? %s ", buffer.extd ? "Yes" : "No");
-//                 printf("RTR? %s ", buffer.rtr ? "Yes" : "No");
-//                 printf("DLC = %d\n", buffer.data_length_code);
-//                 for (int i = 0; i < buffer.data_length_code; i++)
-//                 {
-//                     printf("byte[%d] = 0x%02X ", i, buffer.data[i]);
-//                 }
-//                 printf("\n");
-//                 */
-//                 switch (buffer.identifier) // Check the ID of the message
-//                 {
-//                 case COMM_CAN_ID_IMU_ANGLE:
-//                     if (id_received[COMM_CAN_ID_IMU_ANGLE - COMM_CAN_ID_FISRT] == 0)
-//                     {
-//                         memcpy(&SDIO_buffer.imu_ang, buffer.data, sizeof(COMM_message_IMU_t));
-//                         id_received[COMM_CAN_ID_IMU_ANGLE - COMM_CAN_ID_FISRT] = 1;
-//                         received_count++;
-//                     }
-//                     break;
+                case COMM_CAN_ID_IMU_ACCEL:
+                    if (id_received[COMM_CAN_ID_IMU_ACCEL - COMM_CAN_ID_FISRT] == 0)
+                    {
+                        memcpy(&SDIO_buffer.imu_accel, buffer.data, sizeof(COMM_message_IMU_t));
+                        id_received[COMM_CAN_ID_IMU_ACCEL - COMM_CAN_ID_FISRT] = 1;
+                        received_count++;
+                    }
+                    break;
 
-//                 case COMM_CAN_ID_IMU_ACCEL:
-//                     if (id_received[COMM_CAN_ID_IMU_ACCEL - COMM_CAN_ID_FISRT] == 0)
-//                     {
-//                         memcpy(&SDIO_buffer.imu_accel, buffer.data, sizeof(COMM_message_IMU_t));
-//                         id_received[COMM_CAN_ID_IMU_ACCEL - COMM_CAN_ID_FISRT] = 1;
-//                         received_count++;
-//                     }
-//                     break;
+                case COMM_CAN_ID_ADC:
+                    if (id_received[COMM_CAN_ID_ADC - COMM_CAN_ID_FISRT] == 0)
+                    {
+                        memcpy(&SDIO_buffer.adc, buffer.data, sizeof(COMM_message_ADC_t));
+                        id_received[COMM_CAN_ID_ADC - COMM_CAN_ID_FISRT] = 1;
+                        received_count++;
+                    }
+                    break;
 
-//                 case COMM_CAN_ID_ADC:
-//                     if (id_received[COMM_CAN_ID_ADC - COMM_CAN_ID_FISRT] == 0)
-//                     {
-//                         memcpy(&SDIO_buffer.adc, buffer.data, sizeof(COMM_message_ADC_t));
-//                         id_received[COMM_CAN_ID_ADC - COMM_CAN_ID_FISRT] = 1;
-//                         received_count++;
-//                     }
-//                     break;
+                case COMM_CAN_ID_PROX_ENCODER:
+                    if (id_received[COMM_CAN_ID_PROX_ENCODER - COMM_CAN_ID_FISRT] == 0)
+                    {
+                        memcpy(&SDIO_buffer.prox_encoder, buffer.data, sizeof(COMM_message_PROX_encoder_t));
+                        id_received[COMM_CAN_ID_PROX_ENCODER - COMM_CAN_ID_FISRT] = 1;
+                        received_count++;
+                    }
+                    break;
 
-//                 case COMM_CAN_ID_PROX_ENCODER:
-//                     if (id_received[COMM_CAN_ID_PROX_ENCODER - COMM_CAN_ID_FISRT] == 0)
-//                     {
-//                         memcpy(&SDIO_buffer.prox_encoder, buffer.data, sizeof(COMM_message_PROX_encoder_t));
-//                         id_received[COMM_CAN_ID_PROX_ENCODER - COMM_CAN_ID_FISRT] = 1;
-//                         received_count++;
-//                     }
-//                     break;
+                case COMM_CAN_ID_GPS_LATLONG:
+                    if (id_received[COMM_CAN_ID_GPS_LATLONG - COMM_CAN_ID_FISRT] == 0)
+                    {
+                        memcpy(&SDIO_buffer.gps, buffer.data, sizeof(COMM_message_GPS_t));
+                        id_received[COMM_CAN_ID_GPS_LATLONG - COMM_CAN_ID_FISRT] = 1;
+                        received_count++;
+                    }
+                    break;
 
-//                 case COMM_CAN_ID_GPS_LATLONG:
-//                     if (id_received[COMM_CAN_ID_GPS_LATLONG - COMM_CAN_ID_FISRT] == 0)
-//                     {
-//                         memcpy(&SDIO_buffer.gps, buffer.data, sizeof(COMM_message_GPS_t));
-//                         id_received[COMM_CAN_ID_GPS_LATLONG - COMM_CAN_ID_FISRT] = 1;
-//                         received_count++;
-//                     }
-//                     break;
+                case COMM_CAN_ID_TEMP:
+                    if (id_received[COMM_CAN_ID_TEMP - COMM_CAN_ID_FISRT] == 0)
+                    {
+                        memcpy(&SDIO_buffer.temp, buffer.data, sizeof(COMM_message_Temp_t));
+                        id_received[COMM_CAN_ID_TEMP - COMM_CAN_ID_FISRT] = 1;
+                        received_count++;
+                    }
+                    break;
 
-//                 case COMM_CAN_ID_TEMP:
-//                     if (id_received[COMM_CAN_ID_TEMP - COMM_CAN_ID_FISRT] == 0)
-//                     {
-//                         memcpy(&SDIO_buffer.temp, buffer.data, sizeof(COMM_message_Temp_t));
-//                         id_received[COMM_CAN_ID_TEMP - COMM_CAN_ID_FISRT] = 1;
-//                         received_count++;
-//                     }
-//                     break;
+                default:
+                    break;
+                }
+            }
+            now = xTaskGetTickCount();
+        }
 
-//                 default:
-//                     break;
-//                 }
-//             }
-//             now = xTaskGetTickCount();
-//         }
+        /* Stage 5: Append aggregated row to SD card CSV.
+         * If logging fails 2 consecutive times, give up and park the task. */
+        if (SDIO_SD_Add_Data(&LOG_CSV, &SDIO_buffer) != ESP_OK)
+        {
+            if (prev_reset < 2)
+            {
+                esp_err_t ret;
+                SDIO_SD_DeInit();
 
-//         // Log the Buffer on SD card
-//         //@debug SDIO
-//         // SDIO_SD_log_can_message_to_csv(&buffer);
+                vTaskDelay(pdMS_TO_TICKS(2000));
 
-//         // IF logging Fails squential 2 times without being revived, Put Task out of order
-//         if (SDIO_SD_Add_Data(&LOG_CSV, &SDIO_buffer) != ESP_OK)
-//         {
-
-//             if (prev_reset < 2)
-//             {
-//                 esp_err_t ret;
-//                 SDIO_SD_DeInit();
-
-//                 vTaskDelay(pdMS_TO_TICKS(2000));
-
-//                 ret = SDIO_SD_Init();
-//                 if (ret != ESP_OK)
-//                 {
-//                     prev_reset++;
-//                     ESP_LOGI(TAG, "ERROR! : %s is not Created // Appedended", LOG_CSV.name);
-//                     if (ret == ESP_FAIL)
-//                     {
-//                         ESP_LOGE(TAG, "Failed to mount filesystem. "
-//                                       "If you want the card to be formatted, set the EXAMPLE_FORMAT_IF_MOUNT_FAILED menuconfig option.");
-//                     }
-//                     else
-//                     {
-//                         ESP_LOGE(TAG, "Failed to initialize the card (%s). "
-//                                       "Make sure SD card lines have pull-up resistors in place.",
-//                                  esp_err_to_name(ret));
-//                     }
-//                 }
-//                 else
-//                 {
-//                     ESP_LOGI(TAG, "Filesystem mounted");
-//                     prev_reset = 0;
-//                 }
-//             }
-//             else
-//             {
-//                 SDIO_SD_DeInit();
-//                 while (1)
-//                 {
-//                     ESP_LOGE(TAG, "SDIO_Logging is Down");
-//                     vTaskDelay(pdMS_TO_TICKS(5000));
-//                 }
-//             }
-//         }
-//         else
-//         {
-
-//             // ESP_LOGI(TAG, "Logged CAN message to %s", LOG_CSV.name);
-//         }
-//         vTaskDelay(pdMS_TO_TICKS(60));
-//     }
-// }
+                ret = SDIO_SD_Init();
+                if (ret != ESP_OK)
+                {
+                    prev_reset++;
+                    ESP_LOGI(TAG, "ERROR! : %s is not Created // Appended", LOG_CSV.name);
+                    if (ret == ESP_FAIL)
+                    {
+                        ESP_LOGE(TAG, "Failed to mount filesystem. "
+                                      "If you want the card to be formatted, set the EXAMPLE_FORMAT_IF_MOUNT_FAILED menuconfig option.");
+                    }
+                    else
+                    {
+                        ESP_LOGE(TAG, "Failed to initialize the card (%s). "
+                                      "Make sure SD card lines have pull-up resistors in place.",
+                                 esp_err_to_name(ret));
+                    }
+                }
+                else
+                {
+                    ESP_LOGI(TAG, "Filesystem mounted");
+                    prev_reset = 0;
+                }
+            }
+            else
+            {
+                /* Stage 5: Permanent failure — unmount and park the task */
+                SDIO_SD_DeInit();
+                while (1)
+                {
+                    ESP_LOGE(TAG, "SDIO_Logging is Down");
+                    vTaskDelay(pdMS_TO_TICKS(5000));
+                }
+            }
+        }
+        else
+        {
+            /* Stage 5: Success — reset failure counter */
+            prev_reset = 0;
+        }
+        vTaskDelay(pdMS_TO_TICKS(60));
+    }
+}
+#endif /* USE_SDIO && USE_CAN */
