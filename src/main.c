@@ -24,8 +24,8 @@
 #include "RTC_Time_Sync/rtc_time_sync.h"
 #endif
 
-#define LED_GPIO 2 // GPIO pin for the LED
-#define Queue_Size 10
+// TODO: wire LED_GPIO to actual status-blink logic or remove entirely
+// #define LED_GPIO 2
 
 /*
  * ================================================================
@@ -36,10 +36,7 @@
 
 /* Stage 3: SDIO globals only needed when SD card logging is enabled. */
 #if USE_SDIO
-// Debug Varibales
-SDIO_FileConfig SDIO_test;
-SDIO_FileConfig SDIO_txt;
-SDIO_TxBuffer buffer;
+/* Stage 8: removed unused SDIO_test, SDIO_txt, buffer (were only used by deleted debug block) */
 SDIO_FileConfig LOG_CSV;
 SDIO_TxBuffer SDIO_buffer;
 #endif
@@ -55,8 +52,8 @@ SDIO_TxBuffer SDIO_buffer;
 // 1. Configure TWAI with pins from your ESP32 pinout
 twai_general_config_t g_config = {
     .mode = TWAI_MODE_NORMAL,
-    .tx_io = GPIO_NUM_41, // CAN TX on GPIO1
-    .rx_io = GPIO_NUM_42, // CAN RX on GPIO2
+    .tx_io = CAN_TX_GPIO,  /* Stage 8: centralised in telemetry_config.h */
+    .rx_io = CAN_RX_GPIO,  /* Stage 8: centralised in telemetry_config.h */
     .clkout_io = TWAI_IO_UNUSED,
     .bus_off_io = TWAI_IO_UNUSED,
     .tx_queue_len = 5,
@@ -110,11 +107,7 @@ void app_main(void)
     Time_Sync_obtain_time();
 #endif /* USE_WIFI && USE_RTC_SYNC */
 
-    //@debug
-    ESP_LOGI("Main", "Initializing");
-    vTaskDelay(pdMS_TO_TICKS(3000));
-    ESP_LOGI("Main", ".......");
-    vTaskDelay(pdMS_TO_TICKS(3000));
+    /* Stage 8: removed debug boot delays */
 
     //==========================================SDIO Implementation (DONE)===========================================
     /* Stage 3: Entire SDIO init block guarded by USE_SDIO.
@@ -169,75 +162,7 @@ void app_main(void)
         }
     }
 
-    /*
-    //@debug SDIO
-
-    SDIO_txt.name = "Test2.TXT";
-    SDIO_txt.type = TXT;
-    buffer.string = "Hello World line 1\r\nHello World line 2\r\nHello World line 3\r";
-    if (SDIO_SD_Create_Write_File(&SDIO_txt, &buffer) == ESP_OK)
-    {
-        ESP_LOGI(TAG, "%s Written Successfully!", SDIO_txt.name);
-    }
-
-    LOG_CSV.name = "LOG_1.CSV";
-    LOG_CSV.type = CSV;
-    SDIO_buffer.string = "LOG1";
-    SDIO_buffer.timestamp = "2023-10-01 12:00:00";
-    SDIO_buffer.adc.SUS_1 = 15;
-    SDIO_buffer.adc.SUS_2 = 20;
-    SDIO_buffer.adc.SUS_3 = 25;
-    SDIO_buffer.adc.SUS_4 = 30;
-    SDIO_buffer.adc.PRESSURE_1 = 10;
-    SDIO_buffer.adc.PRESSURE_2 = 15;
-    SDIO_buffer.prox_encoder.RPM_front_left = 1000;
-    SDIO_buffer.prox_encoder.RPM_front_right = 1100;
-    SDIO_buffer.prox_encoder.RPM_rear_left = 1200;
-    SDIO_buffer.prox_encoder.RPM_rear_right = 1300;
-    SDIO_buffer.prox_encoder.ENCODER_angle = 45;
-    SDIO_buffer.imu_accel.x = 100;
-    SDIO_buffer.imu_accel.y = 200;
-    SDIO_buffer.imu_accel.z = 300;
-
-    if (SDIO_SD_Create_Write_File(&LOG_CSV, &SDIO_buffer) == ESP_OK)
-    {
-        ESP_LOGI(TAG, "%s Written Successfully!", LOG_CSV.name);
-    }
-
-    // SDIO_SD_Read_Data(&SDIO_txt);
-    // SDIO_SD_Read_Data(&LOG_CSV);
-
-    // Append data to the existing files
-    buffer.string = "Hello World line 4\r\nHello World line 5\r\n";
-    if (SDIO_SD_Add_Data(&SDIO_txt, &buffer) == ESP_OK)
-    {
-        ESP_LOGI(TAG, "TEST.TXT Appended Successfully!");
-    }
-
-    // Assign Zero to all elements of SDIO_buffer
-    EMPTY_SDIO_BUFFER(SDIO_buffer);
-
-    if (SDIO_SD_Add_Data(&LOG_CSV, &SDIO_buffer) == ESP_OK)
-    {
-        ESP_LOGI(TAG, "%s Appended Successfully!", LOG_CSV.name);
-    }
-
-    if (SDIO_SD_Close_file() == ESP_OK)
-    {
-        ESP_LOGI(TAG, "File Closed Successfully!");
-    }
-
-    // Read the files again to verify the appended data
-    SDIO_SD_Read_Data(&SDIO_txt);
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    SDIO_SD_Read_Data(&LOG_CSV);
-
-    // twai_message_t rx_msg;
-    // SDIO_SD_LOG_CAN_Message(&rx_msg);
-
-    // All done, unmount partition and disable SDMMC peripheral
-    if (SDIO_SD_DeInit() == ESP_OK)
-        ESP_LOGI(TAG, "Card unmounted successfully"); */
+    /* Stage 8: removed large commented-out SDIO debug block */
 #endif /* USE_SDIO */
 
     //==========================================RTOS Implementation (Semaphore can be added)===========================================
@@ -261,8 +186,8 @@ void app_main(void)
     }
     ESP_LOGI("Main", "TWAI Driver started");
 
-    telemetry_queue = xQueueCreate(Queue_Size, sizeof(twai_message_t));
-    CAN_SDIO_queue_Handler = xQueueCreate(Queue_Size, sizeof(twai_message_t));
+    telemetry_queue = xQueueCreate(QUEUE_SIZE, sizeof(twai_message_t));          /* Stage 8: centralised */
+    CAN_SDIO_queue_Handler = xQueueCreate(QUEUE_SIZE, sizeof(twai_message_t));  /* Stage 8: centralised */
 
     if (telemetry_queue == NULL) // If there is no queue created
     {
@@ -282,12 +207,14 @@ void app_main(void)
     // --- Data Acquisition Tasks on Core 1 ---
     /* Stage 3: CAN receive task only when CAN subsystem is enabled. */
 #if USE_CAN
-    BaseType_t result_CAN = xTaskCreatePinnedToCore((TaskFunction_t)CAN_Receive_Task_init, "CAN_Receive_Task", 4096, NULL, (UBaseType_t)4, &CAN_Receive_TaskHandler, 1); // <-- Priority 4
+    BaseType_t result_CAN = xTaskCreatePinnedToCore((TaskFunction_t)CAN_Receive_Task_init, "CAN_Receive_Task",
+                        TASK_STACK_CAN, NULL, (UBaseType_t)TASK_PRIO_CAN, &CAN_Receive_TaskHandler, 1); /* Stage 8: centralised */
 #endif
 
     /* Stage 5: Re-enabled SDIO log task — needs both SDIO and CAN (data source). */
 #if USE_SDIO && USE_CAN
-    BaseType_t result_SDIO = xTaskCreatePinnedToCore((TaskFunction_t)SDIO_Log_Task_init, "SDIO_Log_Task", 4096, NULL, (UBaseType_t)3, &SDIO_Log_TaskHandler, 1); // <-- Core 1, Priority 3
+    BaseType_t result_SDIO = xTaskCreatePinnedToCore((TaskFunction_t)SDIO_Log_Task_init, "SDIO_Log_Task",
+                        TASK_STACK_SDIO, NULL, (UBaseType_t)TASK_PRIO_SDIO, &SDIO_Log_TaskHandler, 1); /* Stage 8: centralised */
 #endif
 
     // --- Network Tasks on Core 0 ---
@@ -295,11 +222,14 @@ void app_main(void)
      * are only meaningful when Wi-Fi is enabled. */
 #if USE_WIFI
   #if USE_MQTT
-    BaseType_t result_MQT = xTaskCreatePinnedToCore(mqtt_sender_task, "mqtt_sender", 4096, telemetry_queue, 3, NULL, 0); // <-- Core 0
+    BaseType_t result_MQT = xTaskCreatePinnedToCore(mqtt_sender_task, "mqtt_sender",
+                        TASK_STACK_MQTT, telemetry_queue, TASK_PRIO_NETWORK, NULL, 0); /* Stage 8: centralised */
   #else
-    BaseType_t result_UDP = xTaskCreatePinnedToCore(udp_sender_task, "udp_sender", 4096, telemetry_queue, 3, NULL, 0); // <-- Core 0
+    BaseType_t result_UDP = xTaskCreatePinnedToCore(udp_sender_task, "udp_sender",
+                        TASK_STACK_UDP, telemetry_queue, TASK_PRIO_NETWORK, NULL, 0); /* Stage 8: centralised */
   #endif
-    BaseType_t result_ConMon = xTaskCreatePinnedToCore(connectivity_monitor_task, "conn_monitor", 4096, NULL, 3, NULL, 0); // <-- Core 0
+    BaseType_t result_ConMon = xTaskCreatePinnedToCore(connectivity_monitor_task, "conn_monitor",
+                        TASK_STACK_CONN_MON, NULL, TASK_PRIO_CONN_MON, NULL, 0); /* Stage 8: centralised */
 #endif /* USE_WIFI */
 
     printf("========================================\n\n");

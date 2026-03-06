@@ -33,10 +33,6 @@
 // SDIO Macros
 //----------------------------
 
-/* Stage 4: removed ESP_WROOM_32 / ESP32_S3 pin macros (CMD, CLK, D0–D3).
- * They were unused — actual pin config is in logging.c via GPIO_NUM_xx.
- * Pin definitions will move to telemetry_config.h in Stage 8. */
-
 #define SDMMC_BUS_WIDTH_4
 
 #define EMPTY_SDIO_BUFFER(...) 	__VA_ARGS__.string = "Empty Read";\
@@ -66,10 +62,11 @@
 /* Stage 4: increased from MAX_CHAR_SIZE 64 — CSV rows can exceed 64 chars */
 #define MAX_LINE_SIZE 256
 #define MOUNT_POINT "/sdcard"
-#define MAX_WRITES 	5
 #define EXAMPLE_IS_UHS1 (CONFIG_EXAMPLE_SDMMC_SPEED_UHS_I_SDR50 || CONFIG_EXAMPLE_SDMMC_SPEED_UHS_I_DDR50)
 
-#define MAX_DAYS_MODIFIED 2
+/* Stage 8: MAX_WRITES and MAX_DAYS_MODIFIED moved to telemetry_config.h
+ * as LOG_FLUSH_EVERY_N_WRITES and MAX_DAYS_MODIFIED respectively. */
+#include "../telemetry_config.h"
 
 //----------------------------
 // CAN Macros

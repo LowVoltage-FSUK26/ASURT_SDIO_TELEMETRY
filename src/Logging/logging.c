@@ -169,8 +169,7 @@ esp_err_t SDIO_SD_Create_Write_File(SDIO_FileConfig *file, SDIO_TxBuffer *pTxBuf
     struct stat st;
     if ((stat(file->path, &st) == 0) && (compare_file_time_days(file->path) <= MAX_DAYS_MODIFIED))
     {
-        //@debgu
-        // ESP_LOGI(TAG, "File is recent");
+        /* Stage 8: removed stale debug comment */
         // Add to the file and don't create new one
         if (SDIO_SD_Add_Data(file, pTxBuffer) != ESP_OK)
         {
@@ -179,9 +178,6 @@ esp_err_t SDIO_SD_Create_Write_File(SDIO_FileConfig *file, SDIO_TxBuffer *pTxBuf
     }
     else // Create new file
     {
-        //@Debug
-        // ESP_LOGI(TAG, "File is not recent or don't exits\n Creating new File!");
-
         f = fopen(file->path, "w");
         if (f == NULL)
         {
@@ -294,12 +290,8 @@ esp_err_t SDIO_SD_Add_Data(SDIO_FileConfig *file, SDIO_TxBuffer *pTxBuffer)
     struct stat st;
     if (stat(file->path, &st) == 0) // Check if the files exists
     {
-        //@debug
-        // ESP_LOGI(TAG, "Found File Successfully!");
         if (f != NULL && (open_file == NULL || strcmp(open_file, file->name) != 0))
         {
-            //@debug
-            //ESP_LOGI(TAG, "Closing the File %s now", open_file);
             fclose(f);        // close the previously opened file
             open_file = NULL; // Reset the open file name
             f = NULL;
@@ -308,22 +300,16 @@ esp_err_t SDIO_SD_Add_Data(SDIO_FileConfig *file, SDIO_TxBuffer *pTxBuffer)
         }
         else if (open_file == NULL) // There is no file open
         {
-            //@debug
-            // ESP_LOGI(TAG, "No file is currently Open");
             f = fopen(file->path, "a");
         }
 
         if (f == NULL)
         {
-            //@debug
-            ESP_LOGE(TAG, "F is equal to Null | Faild to create File");
+            ESP_LOGE(TAG, "F is equal to Null | Failed to create File");
             ret = ESP_FAIL; // Failed to open file for writing
         }
         else
         {
-            //@debug
-            // ESP_LOGI(TAG, "File %s Opened Successfully For appending!", open_file);
-            
             open_file = file->name; // Assign the name of the opened file
       
             /* Stage 4: millisecond-resolution timestamp for append path */
@@ -403,7 +389,7 @@ esp_err_t SDIO_SD_Add_Data(SDIO_FileConfig *file, SDIO_TxBuffer *pTxBuffer)
                 }
             }
 
-            if (writes_Num >= MAX_WRITES)
+            if (writes_Num >= LOG_FLUSH_EVERY_N_WRITES) /* Stage 8: centralised in telemetry_config.h */
             {
                 fflush(f); // Push buffer to disk
                 fclose(f); // Optional but safer after each batch

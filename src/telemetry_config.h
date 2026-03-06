@@ -2,6 +2,7 @@
 #define TELEMETRY_CONFIG_H
 
 #include "credentials.h"
+#include <driver/gpio.h>  /* Stage 8: needed for GPIO_NUM_xx in CAN pin defines */
 
 // ── Master Feature Flags ────────────────────────────────────────
 // Subsystem enable/disable (1 = enabled, 0 = disabled).
@@ -34,5 +35,35 @@ extern const char mqtt_root_ca_pem[];
 // Stage 7: configurable timezone for RTC time sync.
 // Egypt (EET = UTC+3). Change to "GMT+1" / "BST" for UK events.
 #define TIMEZONE_STR "GMT-3"
+
+// ── Stage 8: Centralised hardware & RTOS config ────────────────
+
+// CAN bus GPIO pins
+#define CAN_TX_GPIO             GPIO_NUM_41
+#define CAN_RX_GPIO             GPIO_NUM_42
+
+// RTOS task stack sizes (bytes)
+#define TASK_STACK_CAN          4096
+#define TASK_STACK_SDIO         6144
+#define TASK_STACK_MQTT         6144
+#define TASK_STACK_UDP          4096
+#define TASK_STACK_CONN_MON     3072
+
+// RTOS task priorities
+#define TASK_PRIO_CAN           4
+#define TASK_PRIO_NETWORK       3
+#define TASK_PRIO_SDIO          3
+#define TASK_PRIO_CONN_MON      2
+
+// FreeRTOS queue depth
+#define QUEUE_SIZE              10
+
+// SD logging: flush to disk every N writes
+#define LOG_FLUSH_EVERY_N_WRITES   5
+
+// SD logging: max age (days) before rotating to a new session file
+#define MAX_DAYS_MODIFIED          2
+
+// ────────────────────────────────────────────────────────────────
 
 #endif // TELEMETRY_CONFIG_H
